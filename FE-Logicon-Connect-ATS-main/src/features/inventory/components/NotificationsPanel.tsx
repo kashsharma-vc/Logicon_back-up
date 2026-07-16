@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { notificationsData, Notification } from "../dashboardData"
+import type { Notification } from "../dashboardData"
 import { 
   AlertTriangle, CheckCircle2, AtSign, FileText, Bell, X
 } from "lucide-react"

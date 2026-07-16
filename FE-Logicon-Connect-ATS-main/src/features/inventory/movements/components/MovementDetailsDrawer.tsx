@@ -1,4 +1,4 @@
-import { X, Clock, FileText, User, MapPin, Building, GitCommit } from 'lucide-react'
+import { X, Clock, FileText, User, MapPin, GitCommit } from 'lucide-react'
 import { type StockMovement } from '../../inventoryApi'
 
 interface Props {

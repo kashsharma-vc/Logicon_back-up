@@ -159,7 +159,7 @@ export function HiringApplicationDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [row, setRow] = useState<HiringApplicationRow | null>(null)
   const [stages, setStages] = useState<PipelineStageRow[]>([])
-  const [timeline, setTimeline] = useState<ApplicationStageHistoryBriefRow[]>([])
+  const [, setTimeline] = useState<any[]>([])
   const [resumes, setResumes] = useState<ResumeRow[]>([])
   const [offer, setOffer] = useState<OfferRow | null>(null)
   const [interviews, setInterviews] = useState<InterviewRow[]>([])

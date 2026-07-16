@@ -64,7 +64,7 @@ export function DashboardPage() {
     status: (mrf.status === 'approved' ? 'active' : mrf.status === 'rejected' ? 'at-risk' : mrf.status === 'draft' ? 'on-hold' : 'active') as any,
     progress: 0,
     manager: 'Unknown',
-    dueDate: mrf.created_at ? new Date(mrf.created_at).toISOString().split('T')[0] : 'Unknown',
+    dueDate: mrf.created_at ? new Date(mrf.created_at).toISOString().split('T')[0] || 'Unknown' : 'Unknown',
     risk: 'low'
   }))
 

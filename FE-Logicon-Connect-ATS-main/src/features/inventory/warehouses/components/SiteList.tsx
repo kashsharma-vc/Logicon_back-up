@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, MapPin, Loader2, Filter, MoreHorizontal, User, Eye, X } from 'lucide-react'
+import { Search, MapPin, Loader2, Filter, User, Eye, X } from 'lucide-react'
 import { listSites, type SiteProfileRow } from '@/api/sites'
 import { listClients, type ClientRow } from '@/api/clients'
 

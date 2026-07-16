@@ -1,7 +1,6 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { Plus, Trash2, ArrowUp, ArrowDown, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 
 export type FormFieldType = 'text' | 'number' | 'date' | 'select' | 'textarea'
 
@@ -45,8 +44,8 @@ export function SchemaFormBuilder({ value, onChange }: SchemaFormBuilderProps) {
     const newIndex = direction === 'up' ? index - 1 : index + 1
     if (newIndex < 0 || newIndex >= value.length) return
     const newArr = [...value]
-    const temp = newArr[index]
-    newArr[index] = newArr[newIndex]
+    const temp = newArr[index]!
+    newArr[index] = newArr[newIndex]!
     newArr[newIndex] = temp
     onChange(newArr)
   }
@@ -55,7 +54,7 @@ export function SchemaFormBuilder({ value, onChange }: SchemaFormBuilderProps) {
     <div className="space-y-4">
       <div className="flex justify-between items-center mb-2">
         <h4 className="text-sm font-semibold text-app-heading">Form Fields</h4>
-        <Button size="sm" onClick={handleAddField} className="flex items-center gap-1 bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400">
+        <Button onClick={handleAddField} className="flex items-center gap-1 bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 h-8 text-xs">
           <Plus className="w-4 h-4" /> Add Field
         </Button>
       </div>

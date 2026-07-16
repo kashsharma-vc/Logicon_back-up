@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { inventoryApi, type StockMovementStats } from '../../inventoryApi'
-import { ArrowDownRight, ArrowUpRight, ArrowRightLeft, UserCheck, UserMinus, AlertTriangle, PackageX, CheckCircle, RefreshCw } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, ArrowRightLeft, UserCheck, UserMinus, AlertTriangle, PackageX, RefreshCw } from 'lucide-react'
 
 interface Props {
   refreshKey: number

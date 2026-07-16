@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Filter, SlidersHorizontal } from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import { listScopeNodes } from '@/api/access'
 import { listSites } from '@/api/sites'
 

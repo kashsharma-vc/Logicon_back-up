@@ -1,7 +1,7 @@
-import { X, Package, ShieldCheck, Laptop, Smartphone, Settings, Wrench, Monitor, Armchair, Zap, Droplets, HardHat, Car, Shirt, PenTool, CheckCircle2, AlertTriangle, XCircle, Clock, User, Calendar, IndianRupee, MapPin } from 'lucide-react'
+import { X, Package, ShieldCheck, Laptop, Smartphone, Settings, Wrench, Monitor, Armchair, Zap, Droplets, HardHat, Car, Shirt, PenTool, CheckCircle2, AlertTriangle, XCircle, MapPin } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { InventoryItem } from '../inventoryApi'
-import { CATEGORY_TYPE_OPTIONS, CATEGORY_CONFIGS } from '../categoryFieldConfig'
+import { CATEGORY_CONFIGS } from '../categoryFieldConfig'
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   available: { label: 'Available', className: 'bg-status-success/10 text-status-success border-status-success/20' },
@@ -71,8 +71,8 @@ export function ItemDetailsDrawer({ item, onClose }: ItemDetailsDrawerProps) {
   if (!item) return null
 
   const Icon = getCategoryIcon(item.category_type)
-  const statusBadge = STATUS_BADGE[item.item_status] || STATUS_BADGE.available
-  const stockCfg = STOCK_STATUS_BADGE[item.stock_status] || STOCK_STATUS_BADGE.in_stock
+  const statusBadge = STATUS_BADGE[item.item_status] || STATUS_BADGE.available!
+  const stockCfg = STOCK_STATUS_BADGE[item.stock_status] || STOCK_STATUS_BADGE.in_stock!
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">

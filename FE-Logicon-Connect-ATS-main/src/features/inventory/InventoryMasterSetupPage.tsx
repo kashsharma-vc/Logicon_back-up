@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { 
   Settings, Server, Bell, Shield, Wallet, Plus, Trash2, Save, 
-  Loader2, CheckCircle2, AlertTriangle, Building2, UserCircle, 
+  Loader2, Building2, UserCircle, 
   FileSpreadsheet, ShieldAlert, Network 
 } from 'lucide-react'
 import { cn } from '@/lib/cn'

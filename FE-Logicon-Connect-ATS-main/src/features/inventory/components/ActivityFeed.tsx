@@ -27,7 +27,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
           <div className="absolute left-[1.625rem] top-3 bottom-3 w-px bg-app-border" />
           
           <div className="space-y-1">
-            {activities.map((activity, idx) => {
+            {activities.map((activity) => {
               const { Icon, color } = statusIconMap[activity.status]
               return (
                 <div key={activity.id} className="relative flex items-start gap-4 py-3 px-2 rounded-lg hover:bg-app-muted/60 transition-colors group">

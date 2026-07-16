@@ -1,6 +1,6 @@
 import { 
   ClipboardCheck, FolderPlus, FileBarChart2, Upload, 
-  ListChecks, UserPlus2, MapPin, Download, ClipboardList, UserCheck
+  ListChecks, UserPlus2, MapPin, Download, UserCheck
 } from "lucide-react"
 import { cn } from "@/lib/cn"
 

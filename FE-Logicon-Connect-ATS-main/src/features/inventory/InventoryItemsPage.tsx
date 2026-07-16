@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { 
   Plus, Search, Download, Upload, RefreshCw,
-  AlertTriangle, XCircle, Clock, Package, Edit2, Trash2,
+  AlertTriangle, XCircle, Clock, Package, Edit2,
   Eye, MoreHorizontal, CheckCircle2, ChevronDown, ChevronUp,
   Loader2, TrendingDown, TrendingUp, IndianRupee, Shield, Shirt
 } from 'lucide-react'
@@ -320,7 +320,7 @@ export function InventoryItemsPage() {
                 </td></tr>
               ) : sortedItems.map(item => {
                 const statusBadge = STATUS_BADGE[item.item_status]
-                const stockCfg = STOCK_STATUS_BADGE[item.stock_status] || STOCK_STATUS_BADGE.in_stock
+                const stockCfg = STOCK_STATUS_BADGE[item.stock_status] || STOCK_STATUS_BADGE.in_stock!
                 const StockIcon = stockCfg.icon
                 const catColor = CATEGORY_COLOR[item.category_type] || CATEGORY_COLOR.other
                 const ItemIcon = getCategoryIcon(item.category_type)

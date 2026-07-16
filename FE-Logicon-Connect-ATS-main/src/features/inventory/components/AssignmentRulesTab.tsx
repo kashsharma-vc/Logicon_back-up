@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Network, Plus, Save, Trash2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { inventoryApi, AssignmentRule, InventoryCategory } from '@/features/inventory/inventoryApi'
@@ -35,10 +35,10 @@ export function AssignmentRulesTab() {
     const r = rules[index]
     try {
       if ((r as any).id) {
-        const res = await inventoryApi.updateAssignmentRule((r as any).id, r)
+        const res = await inventoryApi.updateAssignmentRule((rules[index] as any).id, rules[index]!)
         setRules(prev => { const n = [...prev]; n[index] = res; return n })
       } else {
-        const res = await inventoryApi.createAssignmentRule(r)
+        const res = await inventoryApi.createAssignmentRule(rules[index]!)
         setRules(prev => { const n = [...prev]; n[index] = res; return n })
       }
     } catch (e) {
@@ -88,7 +88,7 @@ export function AssignmentRulesTab() {
                 <td className="px-4 py-2">
                   <select 
                     value={(r as any).category || ''} 
-                    onChange={e => setRules(prev => { const n = [...prev]; (n[i] as any).category = e.target.value ? Number(e.target.value) : null; return n })}
+                    onChange={e => setRules(prev => { const n = [...prev]; (n[i]! as any).category = e.target.value ? Number(e.target.value) : null; return n })}
                     className="w-full px-2 py-1.5 bg-app-surface border border-app-border rounded text-sm"
                   >
                     <option value="">Global (All Categories)</option>
@@ -96,16 +96,16 @@ export function AssignmentRulesTab() {
                   </select>
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={r.can_assign_to_employee} onChange={e => setRules(prev => { const n = [...prev]; n[i].can_assign_to_employee = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={r.can_assign_to_employee} onChange={e => setRules(prev => { const n = [...prev]; n[i]!.can_assign_to_employee = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={r.can_assign_to_site} onChange={e => setRules(prev => { const n = [...prev]; n[i].can_assign_to_site = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={r.can_assign_to_site} onChange={e => setRules(prev => { const n = [...prev]; n[i]!.can_assign_to_site = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={r.can_assign_to_client} onChange={e => setRules(prev => { const n = [...prev]; n[i].can_assign_to_client = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={r.can_assign_to_client} onChange={e => setRules(prev => { const n = [...prev]; n[i]!.can_assign_to_client = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={r.can_assign_to_project} onChange={e => setRules(prev => { const n = [...prev]; n[i].can_assign_to_project = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={r.can_assign_to_project} onChange={e => setRules(prev => { const n = [...prev]; n[i]!.can_assign_to_project = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button onClick={() => handleSave(i)} className="p-1.5 text-brand-500 hover:bg-brand-500/10 rounded mr-1" title="Save">

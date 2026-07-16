@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { ShieldAlert, Plus, Save, Trash2, Loader2, Edit2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ShieldAlert, Plus, Save, Trash2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { inventoryApi, InventoryPolicy, InventoryCategory } from '@/features/inventory/inventoryApi'
 
@@ -31,7 +31,7 @@ export function PoliciesTab() {
   }
 
   const handleSave = async (index: number) => {
-    const p = policies[index]
+    const p = policies[index]!
     try {
       if ((p as any).id) {
         const res = await inventoryApi.updatePolicy((p as any).id, p)
@@ -86,7 +86,7 @@ export function PoliciesTab() {
                 <td className="px-4 py-2">
                   <select 
                     value={(p as any).category || ''} 
-                    onChange={e => setPolicies(prev => { const n = [...prev]; (n[i] as any).category = e.target.value ? Number(e.target.value) : null; return n })}
+                    onChange={e => setPolicies(prev => { const n = [...prev]; (n[i]! as any).category = e.target.value ? Number(e.target.value) : null; return n })}
                     className="w-full px-2 py-1.5 bg-app-surface border border-app-border rounded text-sm"
                   >
                     <option value="">Global (All Categories)</option>
@@ -94,13 +94,13 @@ export function PoliciesTab() {
                   </select>
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={p.approval_required} onChange={e => setPolicies(prev => { const n = [...prev]; n[i].approval_required = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={p.approval_required} onChange={e => setPolicies(prev => { const n = [...prev]; n[i]!.approval_required = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={p.warranty_tracking} onChange={e => setPolicies(prev => { const n = [...prev]; n[i].warranty_tracking = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={p.warranty_tracking} onChange={e => setPolicies(prev => { const n = [...prev]; n[i]!.warranty_tracking = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={p.return_required} onChange={e => setPolicies(prev => { const n = [...prev]; n[i].return_required = e.target.checked; return n })} className="rounded border-app-border" />
+                  <input type="checkbox" checked={p.return_required} onChange={e => setPolicies(prev => { const n = [...prev]; n[i]!.return_required = e.target.checked; return n })} className="rounded border-app-border" />
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button onClick={() => handleSave(i)} className="p-1.5 text-brand-500 hover:bg-brand-500/10 rounded mr-1" title="Save">

@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, List, Loader2, Play, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, List, Loader2, Play } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { inventoryApi, InventoryRequest, InventoryRequestType } from './inventoryApi'
 import { FormFieldSchema } from './components/SchemaFormBuilder'
-import { useAuthStore } from '@/features/auth/authStore'
-import { cn } from '@/lib/cn'
 
 export function InventoryOperationsPage() {
   const [requests, setRequests] = useState<InventoryRequest[]>([])
@@ -14,7 +12,6 @@ export function InventoryOperationsPage() {
   const [selectedType, setSelectedType] = useState<InventoryRequestType | null>(null)
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [submitting, setSubmitting] = useState(false)
-  const user = useAuthStore(s => s.me)
 
   useEffect(() => {
     Promise.all([
@@ -22,7 +19,7 @@ export function InventoryOperationsPage() {
       inventoryApi.getRequestTypes()
     ]).then(([reqData, typeData]) => {
       setRequests(reqData)
-      setRequestTypes(typeData.filter(t => t.is_active))
+      setRequestTypes(typeData.filter((t: any) => t.is_active))
       setLoading(false)
     })
   }, [])
@@ -91,12 +88,12 @@ export function InventoryOperationsPage() {
                   {/* Dynamic actions based on workflow state would go here. For MVP we'll show basic buttons if pending */}
                   {req.status === 'pending' && (
                     <>
-                      <Button size="sm" variant="outline" className="text-status-danger border-status-danger/30 hover:bg-status-danger/10" onClick={() => handleAction(req.id, 'reject')}>Reject</Button>
-                      <Button size="sm" className="bg-status-success hover:bg-status-success/90 text-white" onClick={() => handleAction(req.id, 'approve')}>Approve</Button>
+                      <Button variant="secondary" className="text-status-danger border-status-danger/30 hover:bg-status-danger/10 h-8 text-xs" onClick={() => handleAction(req.id, 'reject')}>Reject</Button>
+                      <Button className="bg-status-success hover:bg-status-success/90 text-white h-8 text-xs" onClick={() => handleAction(req.id, 'approve')}>Approve</Button>
                     </>
                   )}
                   {req.status === 'approved' && (
-                    <Button size="sm" className="bg-brand-500 text-white flex items-center gap-1"><Play className="w-4 h-4" /> Assign Asset</Button>
+                    <Button className="bg-brand-500 text-white flex items-center gap-1 h-8 text-xs"><Play className="w-4 h-4" /> Assign Asset</Button>
                   )}
                 </div>
               </div>
@@ -170,7 +167,7 @@ export function InventoryOperationsPage() {
                   ))}
 
                   <div className="flex justify-end gap-3 pt-4 border-t border-app-border mt-6">
-                    <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+                    <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
                     <Button type="submit" disabled={submitting} className="bg-[var(--color-btn-primary)] text-white">
                       {submitting ? 'Submitting...' : 'Submit Request'}
                     </Button>

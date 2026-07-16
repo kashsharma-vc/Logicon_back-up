@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Filter, SlidersHorizontal, Loader2 } from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import { listScopeNodes } from '@/api/access'
-import { listSites } from '@/api/sites'
 import { listClients } from '@/api/clients'
 import { listDepartments } from '@/api/departments'
 import { listJobRoles } from '@/api/jobs'
@@ -16,10 +15,8 @@ export function SiteInventoryFilters({ filters, onFilterChange }: Props) {
   const [clients, setClients] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
   const [roles, setRoles] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    setLoading(true)
     Promise.all([
       listScopeNodes(),
       listClients({}),
@@ -33,7 +30,7 @@ export function SiteInventoryFilters({ filters, onFilterChange }: Props) {
       
       const dList = Array.isArray(deptsRes) ? deptsRes : (deptsRes as any).items || []
       setDepartments(dList)
-    }).finally(() => setLoading(false))
+    })
   }, [])
 
   // Cascade from department to role

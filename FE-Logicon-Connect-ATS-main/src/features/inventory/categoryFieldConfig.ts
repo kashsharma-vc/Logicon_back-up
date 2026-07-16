@@ -25,10 +25,7 @@ export interface CategoryConfig {
   dynamicFields: DynamicField[]
 }
 
-// Shared fields available to multiple categories
-const SHARED_CONDITION_FIELD: DynamicField = {
-  key: 'condition_notes', label: 'Condition Notes', type: 'textarea', group: 'Condition', placeholder: 'Describe the current condition...'
-}
+
 
 export const CATEGORY_CONFIGS: Record<string, CategoryConfig> = {
   ppe: {

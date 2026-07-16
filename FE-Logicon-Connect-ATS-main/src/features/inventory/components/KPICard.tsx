@@ -72,7 +72,7 @@ interface KPICardProps {
   animate?: boolean
 }
 
-export function KPICard({ kpi, animate = true }: KPICardProps) {
+export function KPICard({ kpi }: KPICardProps) {
   const Icon = iconMap[kpi.icon] ?? Briefcase
   const colors = colorMap[kpi.color]
 

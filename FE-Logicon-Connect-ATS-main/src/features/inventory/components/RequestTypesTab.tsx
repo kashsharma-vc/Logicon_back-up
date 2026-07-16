@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Save, Trash2, Edit2, FileSpreadsheet, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { inventoryApi, InventoryRequestType } from '@/features/inventory/inventoryApi'
@@ -63,7 +63,7 @@ export function RequestTypesTab() {
             <p className="text-sm text-app-secondary">Configure the properties and dynamic form schema.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setEditingType(null)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setEditingType(null)}>Cancel</Button>
             <Button onClick={handleSave} className="flex items-center gap-2 bg-[var(--color-btn-primary)] hover:bg-[var(--color-btn-primary-hover)] text-white">
               <Save className="w-4 h-4" /> Save
             </Button>
