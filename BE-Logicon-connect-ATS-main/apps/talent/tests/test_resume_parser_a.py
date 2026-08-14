@@ -852,8 +852,8 @@ class TestResumeViewSetActions(TestCase):
         csv_file = SimpleUploadedFile(
             'candidates.csv',
             (
-                b'full_name,phone,email,skills\n'
-                b'Ganesh More,9876543220,ganesh@example.com,Plumbing;Maintenance\n'
+                b'full_name,phone,alternate_phone,email,skills\n'
+                b'Ganesh More,9876543220,9876543299,ganesh@example.com,Plumbing;Maintenance\n'
             ),
             content_type='text/csv',
         )
@@ -873,6 +873,7 @@ class TestResumeViewSetActions(TestCase):
         self.assertEqual(resp.data['document_type'], 'csv')
         candidate = Candidate.objects.get(phone_normalized='9876543220')
         self.assertEqual(candidate.target_job_role_id, role.pk)
+        self.assertEqual(candidate.alternate_phone, '9876543299')
         self.assertEqual(candidate.skills.count(), 2)
         batch = ResumeImportBatch.objects.get(pk=resp.data['batch_id'])
         self.assertEqual(batch.document_type, 'csv')

@@ -16,7 +16,7 @@ import { Drawer } from '@/components/ui/Drawer'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
-import type { ExcelImportResponse, ResumeImportBatch } from '@/features/talent/types'
+import type { ResumeImportBatch } from '@/features/talent/types'
 
 type UploadMode = 'resumes' | 'excel'
 
@@ -26,30 +26,15 @@ const POLL_MS = 2500
 
 const TERMINAL_BATCH_STATUSES = new Set(['completed', 'completed_with_errors', 'failed'])
 
-interface ExcelResultRow {
-  key: string
-  label: string
-  status: string
-  detail?: string | null
-  error?: string | null
-}
-
-interface ExcelResultSummary {
-  imported: number
-  duplicates: number
-  failed: number
-  rows: ExcelResultRow[]
-}
-
 function batchStatusLabel(status: string): string {
   const map: Record<string, string> = {
     queued: 'Queued',
-    processing: 'Processing resumes',
+    processing: 'Processing candidates',
     completed: 'Completed',
     completed_with_errors: 'Completed with issues',
     failed: 'Failed',
   }
-  return map[status] ?? status.replace(/_/g, ' ')
+  return map[status] ?? status
 }
 
 function itemStatusLabel(status: string): string {
@@ -57,26 +42,21 @@ function itemStatusLabel(status: string): string {
     queued: 'Queued',
     processing: 'Processing',
     indexed: 'Ready',
-    duplicate_file: 'Duplicate',
-    manual_review: 'Needs review',
-    failed: 'Failed',
-    created: 'Imported',
-    imported: 'Imported',
+    created: 'Created',
     updated: 'Updated',
-    duplicate: 'Duplicate',
-    error: 'Failed',
+    imported: 'Imported',
+    manual_review: 'Needs review',
+    duplicate_file: 'Duplicate file',
+    failed: 'Failed',
   }
-  return map[status] ?? status.replace(/_/g, ' ')
+  return map[status] ?? status
 }
 
-function itemStatusVariant(status: string): 'success' | 'info' | 'warning' | 'danger' | 'neutral' | 'attention' {
-  const s = status.toLowerCase()
-  if (s === 'indexed' || s === 'created' || s === 'imported') return 'success'
-  if (s === 'updated') return 'info'
-  if (s === 'duplicate_file' || s === 'duplicate') return 'warning'
-  if (s === 'manual_review') return 'attention'
-  if (s === 'failed' || s === 'error') return 'danger'
-  if (s === 'processing') return 'info'
+function itemStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
+  if (status === 'indexed' || status === 'created' || status === 'imported' || status === 'updated') return 'success'
+  if (status === 'manual_review' || status === 'duplicate_file') return 'warning'
+  if (status === 'failed') return 'danger'
+  if (status === 'processing') return 'info'
   return 'neutral'
 }
 
@@ -85,27 +65,6 @@ function isItemSuccess(status: string): boolean {
   return s === 'indexed' || s === 'created' || s === 'imported' || s === 'updated'
 }
 
-function summarizeExcel(res: ExcelImportResponse): ExcelResultSummary {
-  return {
-    imported: res.imported,
-    duplicates: res.duplicates ?? 0,
-    failed: res.failed,
-    rows: res.items.map((it, idx) => {
-      const rowNum = it.row ?? it.row_number
-      const candidateId = it.candidate ?? it.candidate_id
-      return {
-        key: `excel-${idx}`,
-        label:
-          it.candidate_full_name?.trim() ||
-          it.phone?.trim() ||
-          (rowNum != null ? `Row ${rowNum}` : `Row ${idx + 1}`),
-        status: it.status,
-        detail: candidateId != null ? `Candidate #${candidateId}` : it.phone ?? null,
-        error: it.error,
-      }
-    }),
-  }
-}
 
 export function ResumePoolUploadDrawer({
   open,
@@ -127,9 +86,7 @@ export function ResumePoolUploadDrawer({
   const [submitting, setSubmitting] = useState(false)
   const [polling, setPolling] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
   const [activeBatch, setActiveBatch] = useState<ResumeImportBatch | null>(null)
-  const [excelResult, setExcelResult] = useState<ExcelResultSummary | null>(null)
 
   const terminalNotifiedRef = useRef(false)
   const onSuccessRef = useRef(onSuccess)
@@ -143,7 +100,6 @@ export function ResumePoolUploadDrawer({
     setExcelFile(null)
     setError(null)
     setActiveBatch(null)
-    setExcelResult(null)
     setPolling(false)
     setSubmitting(false)
     terminalNotifiedRef.current = false
@@ -184,32 +140,30 @@ export function ResumePoolUploadDrawer({
     if (!open || !activeBatch?.id || !polling) return
 
     let cancelled = false
+    const id = activeBatch.id
 
-    async function poll() {
-      try {
-        const batch = await getResumeImportBatch(activeBatch!.id)
-        if (cancelled) return
-        setActiveBatch(batch)
-        if (TERMINAL_BATCH_STATUSES.has(batch.status)) {
-          setPolling(false)
-          if (!terminalNotifiedRef.current) {
-            terminalNotifiedRef.current = true
-            onSuccessRef.current?.()
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const fresh = await getResumeImportBatch(id)
+          if (cancelled) return
+          setActiveBatch(fresh)
+          if (TERMINAL_BATCH_STATUSES.has(fresh.status)) {
+            setPolling(false)
+            if (!terminalNotifiedRef.current) {
+              terminalNotifiedRef.current = true
+              onSuccessRef.current?.()
+            }
           }
+        } catch {
+          // silently ignore poll errors
         }
-      } catch (e: unknown) {
-        if (!cancelled) {
-          setError(parseApiError(e, 'Could not refresh batch status').message)
-          setPolling(false)
-        }
-      }
-    }
+      })()
+    }, POLL_MS)
 
-    void poll()
-    const intervalId = window.setInterval(() => void poll(), POLL_MS)
     return () => {
       cancelled = true
-      window.clearInterval(intervalId)
+      window.clearInterval(timer)
     }
   }, [open, activeBatch?.id, polling])
 
@@ -217,16 +171,15 @@ export function ResumePoolUploadDrawer({
     setMode(next)
     setError(null)
     setActiveBatch(null)
-    setExcelResult(null)
     setPolling(false)
     terminalNotifiedRef.current = false
   }
 
   async function submit() {
     setError(null)
-    const role = Number(roleId)
-    if (!roleId || !Number.isFinite(role)) {
-      setError('Select a mapped role before uploading.')
+    const role = Number.parseInt(roleId, 10)
+    if (!Number.isFinite(role)) {
+      setError('Select a mapped role.')
       return
     }
     if (mode === 'resumes' && resumeFiles.length === 0) {
@@ -240,7 +193,6 @@ export function ResumePoolUploadDrawer({
 
     setSubmitting(true)
     setActiveBatch(null)
-    setExcelResult(null)
     terminalNotifiedRef.current = false
 
     try {
@@ -277,7 +229,7 @@ export function ResumePoolUploadDrawer({
   }
 
   const selectedRole = roles.find((r) => String(r.id) === roleId)
-  const showingResult = activeBatch != null || excelResult != null
+  const showingResult = activeBatch != null
 
   return (
     <Drawer
@@ -308,22 +260,9 @@ export function ResumePoolUploadDrawer({
               setActiveBatch(null)
               setPolling(false)
               setResumeFiles([])
-              setError(null)
-              terminalNotifiedRef.current = false
-            }}
-            onRefreshPool={() => {
-              onSuccess?.()
-              onClose()
-            }}
-          />
-        ) : excelResult ? (
-          <ExcelResultPanel
-            result={excelResult}
-            roleName={selectedRole?.name}
-            onUploadMore={() => {
-              setExcelResult(null)
               setExcelFile(null)
               setError(null)
+              terminalNotifiedRef.current = false
             }}
             onRefreshPool={() => {
               onSuccess?.()
@@ -908,97 +847,3 @@ function BatchResultPanel({
   )
 }
 
-
-function ExcelResultPanel({
-  result,
-  roleName,
-  onUploadMore,
-  onRefreshPool,
-}: {
-  result: ExcelResultSummary
-  roleName?: string
-  onUploadMore: () => void
-  onRefreshPool: () => void
-}) {
-  return (
-    <div className="space-y-4">
-      {/* Status header */}
-      <div className="rounded-xl border border-app-border bg-gradient-to-br from-app-muted/60 to-app-surface p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-status-hired/10">
-            <CheckCircle2 className="h-5 w-5 text-status-hired" aria-hidden />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-app-heading">Excel import complete</p>
-            {roleName ? <p className="text-xs text-app-secondary">{roleName}</p> : null}
-          </div>
-        </div>
-
-        {/* Stats row */}
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          <div className="rounded-lg bg-app-surface p-2 text-center shadow-sm">
-            <p className="text-lg font-bold text-status-hired">{result.imported}</p>
-            <p className="text-[10px] uppercase tracking-wide text-app-subtle">Imported</p>
-          </div>
-          <div className="rounded-lg bg-app-surface p-2 text-center shadow-sm">
-            <p className="text-lg font-bold text-status-warning">{result.duplicates}</p>
-            <p className="text-[10px] uppercase tracking-wide text-app-subtle">Duplicates</p>
-          </div>
-          <div className="rounded-lg bg-app-surface p-2 text-center shadow-sm">
-            <p className={cn('text-lg font-bold', result.failed > 0 ? 'text-status-danger' : 'text-app-subtle')}>
-              {result.failed}
-            </p>
-            <p className="text-[10px] uppercase tracking-wide text-app-subtle">Failed</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Row list */}
-      {result.rows.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-app-subtle">Records</p>
-          <ul className="space-y-2">
-            {result.rows.map((row) => {
-              const variant = itemStatusVariant(row.status)
-              const ok = isItemSuccess(row.status)
-              return (
-                <li key={row.key} className="flex items-center gap-3 rounded-lg border border-app-border bg-app-surface p-3">
-                  <div
-                    className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                      ok ? 'bg-status-hired/10 text-status-hired' : 'bg-status-danger/10 text-status-danger',
-                    )}
-                  >
-                    {ok ? (
-                      <CheckCircle2 className="h-4 w-4" aria-hidden />
-                    ) : (
-                      <XCircle className="h-4 w-4" aria-hidden />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-app-text">{row.label}</p>
-                    {row.detail ? <p className="truncate text-xs text-app-subtle">{row.detail}</p> : null}
-                    {row.error ? <p className="mt-0.5 text-xs text-status-danger">{row.error}</p> : null}
-                  </div>
-                  <Badge variant={variant} className="shrink-0 text-[10px]">
-                    {itemStatusLabel(row.status)}
-                  </Badge>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      ) : null}
-
-      {/* Actions */}
-      <div className="flex flex-wrap gap-3 pt-2">
-        <Button type="button" className="flex-1 gap-2" onClick={onRefreshPool}>
-          View pool
-        </Button>
-        <Button type="button" variant="secondary" className="flex-1" onClick={onUploadMore}>
-          Upload more
-        </Button>
-      </div>
-    </div>
-  )
-}

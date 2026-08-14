@@ -79,6 +79,7 @@ class BulkExcelResumeGenerateView(APIView):
         if sheet_rows:
             for idx, row in enumerate(sheet_rows, start=1):
                 mobile = _clean_val(_value(row, 'mobile', 'phone', 'contact', 'mobile_no', 'mobile_number', 'phone_number'))
+                alt_mobile = _clean_val(_value(row, 'alternate_phone', 'alt_phone', 'alternate_number', 'alt_number', 'secondary_phone', 'alt_contact', 'alternate_contact', 'alternate_mobile')) or None
                 name = _clean_val(_value(row, 'name', 'full_name', 'candidate_name', 'first_name', 'name_of_candidate'))
                 first_name, last_name = _row_names(row) if name else ('', '')
                 if not name and (first_name or last_name):
@@ -100,6 +101,7 @@ class BulkExcelResumeGenerateView(APIView):
                 parsed_rows.append({
                     'name': name,
                     'mobile': mobile,
+                    'alt_mobile': alt_mobile,
                     'phone_norm': phone_norm,
                     'designation': designation,
                 })
@@ -134,6 +136,7 @@ class BulkExcelResumeGenerateView(APIView):
                         parsed_rows.append({
                             'name': name,
                             'mobile': mobile,
+                            'alt_mobile': None,
                             'phone_norm': phone_norm,
                             'designation': designation,
                         })
@@ -183,6 +186,7 @@ class BulkExcelResumeGenerateView(APIView):
                 c = Candidate(
                     org=org,
                     phone=row_data['mobile'],
+                    alternate_phone=row_data.get('alt_mobile'),
                     phone_normalized=phone_norm,
                     first_name=first_name,
                     last_name=last_name,
@@ -195,6 +199,8 @@ class BulkExcelResumeGenerateView(APIView):
                 created_phone_set.add(phone_norm)
             elif phone_norm in existing_candidates:
                 c = existing_candidates[phone_norm]
+                if row_data.get('alt_mobile'):
+                    c.alternate_phone = row_data['alt_mobile']
                 c.collar_type = collar_type or c.collar_type
                 c.billing_type = billing_type or c.billing_type
                 c.target_job_role = job_role or c.target_job_role
@@ -205,7 +211,8 @@ class BulkExcelResumeGenerateView(APIView):
             existing_candidates = {c.phone_normalized: c for c in Candidate.objects.filter(org=org, phone_normalized__in=mobiles)}
 
         if candidates_to_update:
-            Candidate.objects.bulk_update(candidates_to_update, ['collar_type', 'billing_type', 'target_job_role'], batch_size=5000)
+            Candidate.objects.bulk_update(candidates_to_update, ['alternate_phone', 'collar_type', 'billing_type', 'target_job_role'], batch_size=5000)
+
 
         # 4. Generate Resumes in bulk efficiently (with strict deduplication for repeated candidates)
         sample_pdf_bytes = self._generate_sample_pdf_bytes()

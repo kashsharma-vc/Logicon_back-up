@@ -384,6 +384,7 @@ class ResumeViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQuerysetMi
         writer.writerow([
             'full_name',
             'phone',
+            'alternate_phone',
             'email',
             'current_location',
             'experience_years',
@@ -394,6 +395,7 @@ class ResumeViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQuerysetMi
         writer.writerow([
             'Ramesh Yadav',
             '9876543210',
+            '9876543211',
             'ramesh@example.com',
             'Pune',
             '4',

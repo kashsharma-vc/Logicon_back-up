@@ -126,6 +126,11 @@ class Candidate(TimeStampedModel):
 
     org = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='candidates')
     phone = models.CharField(max_length=20)
+    alternate_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+    )
     phone_normalized = models.CharField(max_length=20)
     first_name = models.CharField(max_length=128)
     middle_name = models.CharField(max_length=128, blank=True)

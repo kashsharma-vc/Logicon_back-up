@@ -24,6 +24,7 @@ export interface CandidateRow {
   id: number
   org?: number
   phone: string
+  alternate_phone?: string | null
   phone_normalized?: string
   first_name: string
   middle_name?: string
@@ -77,6 +78,7 @@ export interface CandidateRow {
 
 export interface CandidateWriteInput {
   phone: string
+  alternate_phone?: string | null
   first_name: string
   middle_name?: string
   last_name: string

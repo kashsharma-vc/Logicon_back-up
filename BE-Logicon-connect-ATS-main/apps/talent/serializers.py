@@ -59,7 +59,7 @@ class CandidateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Candidate
         fields = [
-            'id', 'org', 'phone', 'phone_normalized',
+            'id', 'org', 'phone', 'phone_normalized','alternate_phone',
             'first_name', 'middle_name', 'last_name', 'full_name',
             'email', 'current_location',
             'total_experience_years', 'current_ctc', 'expected_ctc',
@@ -216,7 +216,7 @@ class CandidateWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Candidate
         fields = [
-            'phone', 'first_name', 'middle_name', 'last_name',
+            'phone','alternate_phone', 'first_name', 'middle_name', 'last_name',
             'email', 'current_location',
             'total_experience_years', 'current_ctc', 'expected_ctc',
             'source', 'lifecycle_status', 'availability_status',
@@ -547,7 +547,7 @@ class _CandidateQueueSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        fields = ['id', 'full_name', 'phone', 'email', 'lifecycle_status']
+        fields = ['id', 'full_name', 'phone','alternate_phone', 'email', 'lifecycle_status']
 
 
 class _ParsedResumeSummarySerializer(serializers.ModelSerializer):

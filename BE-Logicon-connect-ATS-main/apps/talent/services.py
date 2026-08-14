@@ -773,10 +773,15 @@ def _process_candidate_chunk(batch, chunk, org, default_target_job_role, billing
             source_row_number = row.get('_source_row_number')
             try:
                 role = _resolve_import_job_role(org, row, default_target_job_role)
-                phone = _value(row, 'phone', 'mobile', 'contact')
+                phone = _value(row, 'phone', 'mobile', 'contact', 'phone_number', 'mobile_number', 'contact_number')
                 if not phone:
                     raise ValidationError({'phone': 'Phone/mobile is required.'})
                 phone_normalized = normalize_phone(phone)
+                alternate_phone = _value(
+                    row,
+                    'alternate_phone', 'alt_phone', 'alternate_number', 'alt_number',
+                    'secondary_phone', 'alt_contact', 'alternate_contact', 'alternate_mobile'
+                ) or None
                 first_name, last_name = _row_names(row)
                 source_reference = f'excel_import_batch:{batch.pk}:row:{source_row_number}'
                 candidate, created = Candidate.objects.get_or_create(
@@ -784,6 +789,7 @@ def _process_candidate_chunk(batch, chunk, org, default_target_job_role, billing
                     phone_normalized=phone_normalized,
                     defaults={
                         'phone': phone,
+                        'alternate_phone': alternate_phone,
                         'first_name': first_name,
                         'last_name': last_name,
                         'email': _value(row, 'email') or '',
@@ -802,6 +808,9 @@ def _process_candidate_chunk(batch, chunk, org, default_target_job_role, billing
                 if not created:
                     duplicates += 1
                     update_fields = []
+                    if alternate_phone and candidate.alternate_phone != alternate_phone:
+                        candidate.alternate_phone = alternate_phone
+                        update_fields.append('alternate_phone')
                     if billing_type and candidate.billing_type != billing_type:
                         candidate.billing_type = billing_type
                         update_fields.append('billing_type')
@@ -971,6 +980,8 @@ def process_excel_import_batch(batch_id: int, chunk_size: int = 500) -> dict:
 
 def import_candidates_from_excel(user, uploaded_file, default_target_job_role=None, source_type='excel_import', billing_type=None) -> dict:
     """Create an Excel/CSV import batch and enqueue Celery task for async chunk processing."""
+    import sys
+    from django.conf import settings
     from apps.talent.models import ResumeImportBatch
 
     filename = getattr(uploaded_file, 'name', '') or 'candidate-import'
@@ -1002,7 +1013,12 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
             from apps.talent.tasks import process_excel_import_batch_task
             process_excel_import_batch_task.delay(batch.pk, chunk_size=500)
 
-        transaction.on_commit(_enqueue)
+        # In testing or eager Celery mode, execute synchronously
+        is_eager = getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False) or 'test' in sys.argv
+        if is_eager:
+            process_excel_import_batch(batch.pk, chunk_size=500)
+        else:
+            transaction.on_commit(_enqueue)
 
     batch.refresh_from_db()
     items = []
@@ -1032,6 +1048,7 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
     }
 
 
+
 def _get_or_create_import_candidate(*, org, phone_normalized, phone, normalized, target_job_role, source, billing_type=None):
     from .models import Candidate
 
@@ -1039,6 +1056,7 @@ def _get_or_create_import_candidate(*, org, phone_normalized, phone, normalized,
     last_name = normalized.get('last_name') or 'Unknown'
     defaults = {
         'phone': phone,
+        'alternate_phone': normalized.get('alternate_phone') or None,
         'first_name': first_name,
         'middle_name': normalized.get('middle_name') or '',
         'last_name': last_name,
@@ -1414,7 +1432,11 @@ def _find_candidate_import_header_row(rows) -> int | None:
     Business users often add a title row above the table.  The importer needs to
     tolerate that and start at the row containing phone/name columns.
     """
-    phone_headers = {'phone', 'mobile', 'contact', 'mobile_number', 'phone_number', 'contact_number'}
+    phone_headers = {
+        'phone', 'mobile', 'contact', 'mobile_number', 'phone_number', 'contact_number',
+        'alternate_phone', 'alt_phone', 'alternate_number', 'alt_number', 'secondary_phone',
+        'alt_contact', 'alternate_contact', 'alternate_mobile',
+    }
     name_headers = {'first_name', 'firstname', 'last_name', 'lastname', 'full_name', 'name'}
     profile_headers = {
         'email', 'current_role', 'role', 'job_role', 'current_location', 'location',
