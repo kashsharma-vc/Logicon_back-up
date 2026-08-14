@@ -1,4 +1,4 @@
-﻿import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { api, isAuthRequestUrl } from '@/api/client'
 import { useAuthStore } from '@/features/auth/authStore'
 
@@ -48,7 +48,7 @@ export function setupApiInterceptors(): void {
       }
 
       const reqUrl = original.url ?? ''
-      if (isAuthRequestUrl(reqUrl)) {
+      if (isAuthRequestUrl(reqUrl) || reqUrl.includes('/accounts/logout/')) {
         return Promise.reject(error)
       }
 

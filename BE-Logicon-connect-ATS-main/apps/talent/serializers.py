@@ -54,6 +54,7 @@ class CandidateSerializer(serializers.ModelSerializer):
     employee_status = serializers.SerializerMethodField()
     deployment_id = serializers.SerializerMethodField()
     deployment_status = serializers.SerializerMethodField()
+    mapped_job_roles = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -68,6 +69,7 @@ class CandidateSerializer(serializers.ModelSerializer):
             'current_company', 'current_role',
             'collar_type', 'billing_type',
             'target_job_role', 'target_job_role_name', 'target_job_role_code',
+            'mapped_job_roles',
             'source_reference',
             'is_duplicate', 'duplicate_of', 'do_not_contact',
             'skills_count', 'resume_count',
@@ -163,6 +165,49 @@ class CandidateSerializer(serializers.ModelSerializer):
 
     def get_deployment_status(self, obj):
         return self._journey(obj)['deployment_status']
+
+    def get_mapped_job_roles(self, obj):
+        roles = []
+        seen = set()
+
+        if obj.target_job_role:
+            roles.append({
+                'id': obj.target_job_role.id,
+                'name': obj.target_job_role.name,
+                'code': obj.target_job_role.code,
+            })
+            seen.add(obj.target_job_role.id)
+
+        for r in obj.resumes.all():
+            if r.target_job_role and r.target_job_role.id not in seen:
+                roles.append({
+                    'id': r.target_job_role.id,
+                    'name': r.target_job_role.name,
+                    'code': r.target_job_role.code,
+                })
+                seen.add(r.target_job_role.id)
+
+        for item in obj.resume_import_items.all():
+            if item.batch and item.batch.target_job_role and item.batch.target_job_role.id not in seen:
+                br = item.batch.target_job_role
+                roles.append({
+                    'id': br.id,
+                    'name': br.name,
+                    'code': br.code,
+                })
+                seen.add(br.id)
+
+        if hasattr(obj, 'hiring_applications'):
+            for app in obj.hiring_applications.all():
+                if app.job_role and app.job_role.id not in seen:
+                    roles.append({
+                        'id': app.job_role.id,
+                        'name': app.job_role.name,
+                        'code': app.job_role.code,
+                    })
+                    seen.add(app.job_role.id)
+
+        return roles
 
 
 class CandidateWriteSerializer(serializers.ModelSerializer):

@@ -14,12 +14,21 @@ from rest_framework.viewsets import ModelViewSet
 from apps.access.permissions import HasCapability
 from apps.access.viewsets import ActionCapabilityMixin
 
+from rest_framework.pagination import PageNumberPagination
+
 from .models import JobRole
 from .serializers import JobRoleSerializer, JobRoleWriteSerializer
 
 
+class JobRolePagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 1000
+
+
 class JobRoleViewSet(ActionCapabilityMixin, ModelViewSet):
     permission_classes = [IsAuthenticated, HasCapability]
+    pagination_class = JobRolePagination
     filterset_fields = ['org', 'skill_category', 'is_active']
     search_fields = ['name', 'code']
 

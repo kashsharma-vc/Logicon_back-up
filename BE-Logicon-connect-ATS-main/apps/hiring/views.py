@@ -818,7 +818,7 @@ class HiringDemandViewSet(ReadOnlyModelViewSet):
         # Ranked path
         save_results = request.query_params.get('save_results', 'true').strip().lower() != 'false'
         results = rank_candidates(
-            demand, base_qs, request.query_params, save_results=save_results,
+            demand, base_qs, request.query_params, save_results=False,
             user=request.user,
         )
 
@@ -830,8 +830,16 @@ class HiringDemandViewSet(ReadOnlyModelViewSet):
             except ValueError:
                 pass
 
-        ctx = {'request': request}
         page = self.paginate_queryset(results)
+        items_to_save = page if page is not None else results[:50]
+
+        if save_results and items_to_save:
+            from apps.hiring.matching.services import _save_match_results
+            saved_ids = _save_match_results(demand, items_to_save, request.user)
+            for item in items_to_save:
+                item['match_result'] = saved_ids.get(item['candidate'].pk)
+
+        ctx = {'request': request}
         if page is not None:
             return self.get_paginated_response(
                 CandidatePoolResultSerializer(page, many=True, context=ctx).data
@@ -975,6 +983,98 @@ class HiringDemandViewSet(ReadOnlyModelViewSet):
             ).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=['post'], url_path='bulk-shortlist-candidates')
+    def bulk_shortlist_candidates(self, request, pk=None):
+        """
+        POST /api/hiring/demands/{id}/bulk-shortlist-candidates/
+        Body: { candidate_ids: [...], comment? }
+        Creates HiringApplications for multiple candidates in bulk.
+        """
+        if not request.user.is_superuser:
+            caps = get_user_capabilities(request.user)
+            if HIRING_APP_CREATE not in caps:
+                raise PermissionDenied('hiring_application.create capability required.')
+
+        demand = self.get_object()
+        mrf = demand.mrf
+        if mrf.status != 'approved':
+            raise ValidationError({'non_field_errors': 'MRF must be approved to shortlist candidates.'})
+
+        candidate_ids = request.data.get('candidate_ids', [])
+        comment = request.data.get('comment', 'Bulk shortlisted via candidate pool.')
+
+        if not isinstance(candidate_ids, list) or not candidate_ids:
+            raise ValidationError({'candidate_ids': 'Provide a non-empty list of candidate_ids.'})
+
+        from apps.talent.models import Candidate
+        candidates = Candidate.objects.filter(pk__in=candidate_ids, is_blacklisted=False)
+        if not request.user.is_superuser:
+            user_org_id = getattr(request.user, 'org_id', None)
+            candidates = candidates.filter(org_id=user_org_id)
+
+        already_linked_ids = set(
+            HiringApplication.objects.filter(
+                mrf_line_item=demand, candidate_id__in=[c.pk for c in candidates]
+            ).values_list('candidate_id', flat=True)
+        )
+
+        first_stage = default_initial_stage(mrf.org)
+        now = timezone.now()
+
+        created_count = 0
+        skipped_count = 0
+
+        with transaction.atomic():
+            for candidate in candidates:
+                if candidate.pk in already_linked_ids:
+                    skipped_count += 1
+                    continue
+
+                match_result = (
+                    CandidateMatchResult.objects
+                    .filter(candidate=candidate, mrf_line_item=demand)
+                    .order_by('-created_at')
+                    .first()
+                )
+                match_score = None
+                match_snapshot = {}
+                if match_result:
+                    match_score = match_result.final_score if match_result.final_score is not None else match_result.match_score
+                    from apps.hiring.matching.services import match_result_snapshot
+                    match_snapshot = match_result_snapshot(match_result)
+
+                app = HiringApplication.objects.create(
+                    org=mrf.org,
+                    candidate=candidate,
+                    mrf=mrf,
+                    mrf_line_item=demand,
+                    site=mrf.site,
+                    job_role=demand.job_role,
+                    current_stage=first_stage,
+                    status='shortlisted',
+                    shortlisted_by=request.user,
+                    shortlisted_at=now,
+                    match_score=match_score,
+                    match_result=match_result,
+                    match_snapshot=match_snapshot,
+                )
+
+                ApplicationStageHistory.objects.create(
+                    hiring_application=app,
+                    from_stage=None,
+                    to_stage=first_stage,
+                    from_status='',
+                    to_status='shortlisted',
+                    moved_by=request.user,
+                    comment=comment,
+                )
+                created_count += 1
+
+        return Response({
+            'created_count': created_count,
+            'skipped_count': skipped_count,
+        })
 
 
 # ─── CandidateMatchResultViewSet ──────────────────────────────────────────────

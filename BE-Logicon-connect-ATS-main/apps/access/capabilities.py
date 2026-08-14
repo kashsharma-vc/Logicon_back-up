@@ -436,6 +436,7 @@ ROLE_CAPABILITIES = {
         SALES_PROPOSAL_SEND_TO_CLIENT,
         SALES_SURVEY_READ,
         INTERVIEW_ASSIGNMENT_READ, INTERVIEW_FEEDBACK_CREATE,
+        FIELD_TRACKING_READ,
     ],
 
     # Sales Executive — creates clients/sites/campaigns, raises MRF, creates onboarding requests, manages sales leads
@@ -459,6 +460,7 @@ ROLE_CAPABILITIES = {
         SALES_PROPOSAL_SEND_TO_CLIENT,
         SALES_SURVEY_READ,
         INTERVIEW_ASSIGNMENT_READ, INTERVIEW_FEEDBACK_CREATE,
+        FIELD_TRACKING_READ,
     ],
 
     # Operations Executive — site operations, MRF creation, assigned workflow action.

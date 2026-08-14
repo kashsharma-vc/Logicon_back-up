@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ArrowRightLeft, CheckCircle2, Play, Search, XCircle } from 'lucide-react'
-import { listSiteDeployments } from '@/api/deployment'
+import { ArrowRightLeft, CheckCircle2, Copy, Key, Play, Search, ShieldCheck, X, XCircle } from 'lucide-react'
+import { listSiteDeployments, resetFieldPin } from '@/api/deployment'
 import { listJobRoles, type JobRoleRow } from '@/api/jobs'
 import { listSites, type SiteProfileRow } from '@/api/sites'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
+
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -96,7 +97,61 @@ export function SiteDeploymentsPage() {
   const [drawerDeployment, setDrawerDeployment] = useState<SiteDeploymentRow | null>(null)
   const [rowSuccess, setRowSuccess] = useState<Record<number, string>>({})
 
+  const [pinModal, setPinModal] = useState<{
+    isOpen: boolean
+    employeeName: string
+    orgId: number
+    employeeCode: string
+    pin: string
+    loading: boolean
+    copied: boolean
+  }>({
+    isOpen: false,
+    employeeName: '',
+    orgId: 1,
+    employeeCode: '',
+    pin: '',
+    loading: false,
+    copied: false,
+  })
+
+  async function handleResetPin(row: SiteDeploymentRow) {
+    const name = row.employee_full_name ?? `Employee #${row.employee}`
+    const orgId = row.org ?? 1
+    const code = row.employee_code || String(row.employee)
+
+    setPinModal({
+      isOpen: true,
+      employeeName: name,
+      orgId,
+      employeeCode: code,
+      pin: '',
+      loading: true,
+      copied: false,
+    })
+
+    try {
+      const res = await resetFieldPin(row.employee)
+      setPinModal({
+        isOpen: true,
+        employeeName: name,
+        orgId,
+        employeeCode: res.employee_code || code,
+        pin: res.pin,
+        loading: false,
+        copied: false,
+      })
+    } catch (e: any) {
+      setPinModal((prev) => ({
+        ...prev,
+        loading: false,
+        pin: 'ERROR: Reset failed',
+      }))
+    }
+  }
+
   const [employeeInput, setEmployeeInput] = useState(employee != null ? String(employee) : '')
+
 
   useEffect(() => {
     setEmployeeInput(employee != null ? String(employee) : '')
@@ -328,9 +383,11 @@ export function SiteDeploymentsPage() {
                         <p className="text-sm font-medium text-app-text">
                           {d.employee_full_name ?? `Employee #${d.employee}`}
                         </p>
-                        {d.employee_code ? (
-                          <p className="font-mono text-xs text-app-secondary">{d.employee_code}</p>
-                        ) : null}
+                        <div className="flex items-center gap-1.5 font-mono text-[11px] text-app-secondary">
+                          <span>Org ID: <strong className="text-app-text">{d.org ?? 1}</strong></span>
+                          <span>•</span>
+                          <span>Code: <strong className="text-app-text">{d.employee_code || d.employee}</strong></span>
+                        </div>
                       </TD>
                       <TD className="py-2 text-xs">
                         {d.site_name ?? siteNameById.get(d.site) ?? `Site #${d.site}`}
@@ -390,6 +447,14 @@ export function SiteDeploymentsPage() {
                                   <ArrowRightLeft className="h-3 w-3" aria-hidden /> Transfer
                                 </Button>
                               ) : null}
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                className="min-h-7 gap-1 px-2 text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400"
+                                onClick={() => handleResetPin(d)}
+                              >
+                                <Key className="h-3 w-3" aria-hidden /> Reset PIN
+                              </Button>
                               {canCancel ? (
                                 <Button
                                   type="button"
@@ -405,6 +470,7 @@ export function SiteDeploymentsPage() {
                           {success ? <p className="text-[11px] text-status-hired">{success}</p> : null}
                         </div>
                       </TD>
+
                     </TR>
                   )
                 })}
@@ -483,6 +549,88 @@ export function SiteDeploymentsPage() {
         deployment={drawerDeployment}
         onSuccess={(r) => onSuccess(r)}
       />
+
+      {/* Field Mobile Credentials & Reset PIN Modal */}
+      {pinModal.isOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-app-border bg-app-surface p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-app-border pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-emerald-500" />
+                <h2 className="text-base font-semibold text-app-text">Field Mobile Credentials</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinModal((prev) => ({ ...prev, isOpen: false }))}
+                className="rounded-md p-1 text-app-subtle hover:bg-app-muted hover:text-app-text"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div className="rounded-lg bg-app-muted/40 p-3">
+                <p className="text-xs text-app-subtle">Employee</p>
+                <p className="text-sm font-semibold text-app-text">{pinModal.employeeName}</p>
+              </div>
+
+              {pinModal.loading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Spinner label="Resetting PIN and dispatching SMS..." />
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-app-border p-3">
+                      <p className="text-[11px] font-medium text-app-subtle uppercase tracking-wider">Organization ID</p>
+                      <p className="font-mono text-lg font-bold text-app-text">{pinModal.orgId}</p>
+                    </div>
+                    <div className="rounded-lg border border-app-border p-3">
+                      <p className="text-[11px] font-medium text-app-subtle uppercase tracking-wider">Employee Code</p>
+                      <p className="font-mono text-lg font-bold text-app-text">{pinModal.employeeCode}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border-2 border-emerald-500/30 bg-emerald-500/10 p-4 text-center dark:bg-emerald-950/30">
+                    <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New 6-Digit Field PIN</p>
+                    <p className="mt-1 font-mono text-3xl font-black tracking-widest text-emerald-700 dark:text-emerald-300">
+                      {pinModal.pin}
+                    </p>
+                    <p className="mt-2 text-[11px] text-emerald-600/80 dark:text-emerald-400/80">
+                      ✓ Dispatched via SMS to employee's registered mobile number.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full justify-center gap-1.5"
+                      onClick={() => {
+                        const copyText = `Org ID: ${pinModal.orgId}\nEmployee Code: ${pinModal.employeeCode}\nField PIN: ${pinModal.pin}\nLogin URL: http://localhost:5173/field-login`
+                        void navigator.clipboard.writeText(copyText)
+                        setPinModal((prev) => ({ ...prev, copied: true }))
+                        setTimeout(() => setPinModal((prev) => ({ ...prev, copied: false })), 2000)
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                      {pinModal.copied ? 'Copied Credentials!' : 'Copy Credentials'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => setPinModal((prev) => ({ ...prev, isOpen: false }))}
+                    >
+                      Done
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
+

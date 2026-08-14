@@ -23,6 +23,7 @@ export interface ListJobRolesParams {
   skill_category?: SkillCategory
   is_active?: boolean
   page?: number
+  page_size?: number
 }
 
 export interface JobRoleWriteInput {
@@ -52,6 +53,7 @@ export async function listJobRoles(
       skill_category: normalized.skill_category || undefined,
       is_active: typeof normalized.is_active === 'boolean' ? String(normalized.is_active) : undefined,
       page: normalized.page ?? undefined,
+      page_size: normalized.page_size ?? undefined,
     },
   })
   const out = unwrapDrfResults<JobRoleRow>(data)
@@ -59,6 +61,32 @@ export async function listJobRoles(
     return out.items
   }
   return out
+}
+
+export async function fetchAllJobRoles(params?: ListJobRolesParams): Promise<JobRoleRow[]> {
+  const allItems: JobRoleRow[] = []
+  let currentPage = 1
+  let hasMore = true
+  const maxPages = 50 // Safety cap
+
+  while (hasMore && currentPage <= maxPages) {
+    const res = await listJobRoles({
+      ...params,
+      page: currentPage,
+      page_size: 1000,
+    })
+    if (!res.items || res.items.length === 0) {
+      hasMore = false
+      break
+    }
+    allItems.push(...res.items)
+    if (res.count != null && allItems.length >= res.count) {
+      hasMore = false
+    } else {
+      currentPage++
+    }
+  }
+  return allItems
 }
 
 export async function createJobRole(payload: JobRoleWriteInput) {

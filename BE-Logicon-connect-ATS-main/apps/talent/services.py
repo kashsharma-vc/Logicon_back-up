@@ -657,6 +657,7 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
             billing_type=billing_type,
         )
 
+        import_items_to_create = []
         for index, row in enumerate(rows, start=2):
             source_row_number = row.get('_source_row_number') or index
             try:
@@ -692,33 +693,11 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                     if billing_type and candidate.billing_type != billing_type:
                         candidate.billing_type = billing_type
                         update_fields.append('billing_type')
+                    if role and candidate.target_job_role != role:
+                        candidate.target_job_role = role
+                        update_fields.append('target_job_role')
                     if update_fields:
                         candidate.save(update_fields=update_fields)
-
-                if first_name or last_name:
-                    update_fields = []
-                    updates = {
-                        'first_name': first_name,
-                        'last_name': last_name,
-                        'email': _value(row, 'email') or '',
-                        'current_location': _value(row, 'current_location', 'location') or '',
-                        'total_experience_years': _decimal_or_none(
-                            _value(row, 'total_experience_years', 'experience_years', 'experience')
-                        ),
-                        'current_company': _value(row, 'current_company', 'company') or '',
-                        'current_role': _value(row, 'current_role', 'role', 'job_role') or (role.name if role else ''),
-                        'target_job_role': role,
-                    }
-                    if not candidate.source_reference:
-                        updates['source_reference'] = source_reference
-                    for field, value in updates.items():
-                        if value is None or value == '':
-                            continue
-                        if getattr(candidate, field) != value:
-                            setattr(candidate, field, value)
-                            update_fields.append(field)
-                    if update_fields:
-                        candidate.save(update_fields=list(dict.fromkeys(update_fields)))
 
                 for skill_name in _split_skills(_value(row, 'skills', 'skill')):
                     normalized = normalize_skill_name(skill_name)
@@ -733,15 +712,17 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
 
                 imported += 1
                 row_status = 'created' if created else 'updated'
-                ResumeImportItem.objects.create(
-                    batch=batch,
-                    original_filename=f'Row {source_row_number}',
-                    content_type=content_type,
-                    size_bytes=0,
-                    document_type=document_type,
-                    row_number=source_row_number,
-                    status='indexed',
-                    candidate=candidate,
+                import_items_to_create.append(
+                    ResumeImportItem(
+                        batch=batch,
+                        original_filename=f'Row {source_row_number}',
+                        content_type=content_type,
+                        size_bytes=0,
+                        document_type=document_type,
+                        row_number=source_row_number,
+                        status='indexed',
+                        candidate=candidate,
+                    )
                 )
                 items.append({
                     'row': source_row_number,
@@ -752,21 +733,26 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
             except Exception as exc:
                 failed += 1
                 error = _flatten_error(exc)
-                ResumeImportItem.objects.create(
-                    batch=batch,
-                    original_filename=f'Row {source_row_number}',
-                    content_type=content_type,
-                    size_bytes=0,
-                    document_type=document_type,
-                    row_number=source_row_number,
-                    status='failed',
-                    error_message=error[:2000],
+                import_items_to_create.append(
+                    ResumeImportItem(
+                        batch=batch,
+                        original_filename=f'Row {source_row_number}',
+                        content_type=content_type,
+                        size_bytes=0,
+                        document_type=document_type,
+                        row_number=source_row_number,
+                        status='failed',
+                        error_message=error[:2000],
+                    )
                 )
                 items.append({
                     'row': source_row_number,
                     'status': 'failed',
                     'error': error,
                 })
+
+        if import_items_to_create:
+            ResumeImportItem.objects.bulk_create(import_items_to_create, batch_size=5000)
 
         batch.status = 'completed_with_errors' if failed else 'completed'
         batch.processed_count = imported + failed
@@ -1118,32 +1104,40 @@ def _read_candidate_sheet(uploaded_file) -> list[dict]:
                 'file': 'openpyxl is not installed; install requirements to import .xlsx files.'
             })
         workbook = load_workbook(BytesIO(raw), read_only=True, data_only=True)
-        sheet = workbook.active
-        rows = list(sheet.iter_rows(values_only=True))
-        if not rows:
-            return []
-
-        header_index = _find_candidate_import_header_row(rows)
-        if header_index is None:
-            raise ValidationError({
-                'file': (
-                    'Could not find candidate headers. Include a header row with '
-                    'phone/mobile/contact and candidate name fields.'
-                )
-            })
-
-        headers = [_norm_header(h) for h in rows[header_index]]
         output = []
-        for source_row_number, values in enumerate(rows[header_index + 1:], start=header_index + 2):
-            row = {}
-            for idx, header in enumerate(headers):
-                if not header:
-                    continue
-                value = values[idx] if idx < len(values) else ''
-                row[header] = '' if value is None else str(value).strip()
-            if any(row.values()):
-                row['_source_row_number'] = source_row_number
-                output.append(row)
+
+        for sheet in workbook.worksheets:
+            rows = list(sheet.iter_rows(values_only=True))
+            if not rows:
+                continue
+
+            header_index = _find_candidate_import_header_row(rows)
+            if header_index is None:
+                for source_row_number, values in enumerate(rows, start=1):
+                    if not values or not any(values):
+                        continue
+                    r_str = [str(v).strip() if v is not None else '' for v in values]
+                    row = {
+                        'name': r_str[0] if len(r_str) > 0 else '',
+                        'phone': r_str[1] if len(r_str) > 1 else '',
+                        'role': r_str[2] if len(r_str) > 2 else '',
+                        '_source_row_number': source_row_number,
+                    }
+                    if row['name'] or row['phone']:
+                        output.append(row)
+                continue
+
+            headers = [_norm_header(h) for h in rows[header_index]]
+            for source_row_number, values in enumerate(rows[header_index + 1:], start=header_index + 2):
+                row = {}
+                for idx, header in enumerate(headers):
+                    if not header:
+                        continue
+                    value = values[idx] if idx < len(values) else ''
+                    row[header] = '' if value is None else str(value).strip()
+                if any(row.values()):
+                    row['_source_row_number'] = source_row_number
+                    output.append(row)
         return output
 
     raise ValidationError({'file': 'Upload a .csv or .xlsx file.'})

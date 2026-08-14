@@ -135,7 +135,7 @@ export const CAP = {
 
   INVENTORY_READ: 'inventory.read',
   INVENTORY_MANAGE: 'inventory.manage',
-    ASSET_VAULT_ACCESS: 'asset_vault.access',
+  ASSET_VAULT_ACCESS: 'asset_vault.access',
 
 } as const
 

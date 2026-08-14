@@ -73,7 +73,11 @@ const getCategoryIcon = (type: string) => {
 function SmartWarningBanner({ warnings }: { warnings: InventoryWarnings | null }) {
   const [collapsed, setCollapsed] = useState(false)
   if (!warnings) return null
-  const total = warnings.low_stock.length + warnings.out_of_stock.length + warnings.warranty_expiring.length
+  const lowStock = warnings.low_stock ?? []
+  const outOfStock = warnings.out_of_stock ?? []
+  const warrantyExpiring = warnings.warranty_expiring ?? []
+
+  const total = lowStock.length + outOfStock.length + warrantyExpiring.length
   if (total === 0) return null
 
   return (
@@ -83,9 +87,9 @@ function SmartWarningBanner({ warnings }: { warnings: InventoryWarnings | null }
           <AlertTriangle className="w-4 h-4 text-status-warning" />
           <span className="text-sm font-semibold text-status-warning">
             {[
-              warnings.out_of_stock.length > 0 && `${warnings.out_of_stock.length} out-of-stock`,
-              warnings.low_stock.length > 0 && `${warnings.low_stock.length} low-stock`,
-              warnings.warranty_expiring.length > 0 && `${warnings.warranty_expiring.length} warranty expiring soon`,
+              outOfStock.length > 0 && `${outOfStock.length} out-of-stock`,
+              lowStock.length > 0 && `${lowStock.length} low-stock`,
+              warrantyExpiring.length > 0 && `${warrantyExpiring.length} warranty expiring soon`,
             ].filter(Boolean).join(', ')} — action required
           </span>
         </div>
@@ -93,22 +97,22 @@ function SmartWarningBanner({ warnings }: { warnings: InventoryWarnings | null }
       </div>
       {!collapsed && (
         <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          {warnings.out_of_stock.length > 0 && (
+          {outOfStock.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-xs font-semibold text-status-danger flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />Out of Stock</p>
-              {warnings.out_of_stock.map(i => <p key={i.id} className="text-xs text-app-text bg-status-danger/10 rounded px-2 py-1">{i.code} — {i.name}</p>)}
+              {outOfStock.map(i => <p key={i.id} className="text-xs text-app-text bg-status-danger/10 rounded px-2 py-1">{i.code} — {i.name}</p>)}
             </div>
           )}
-          {warnings.low_stock.length > 0 && (
+          {lowStock.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-xs font-semibold text-status-warning flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />Low Stock</p>
-              {warnings.low_stock.map(i => <p key={i.id} className="text-xs text-app-text bg-status-warning/10 rounded px-2 py-1">{i.code} — {i.name} ({i.stock}/{i.reorder_level})</p>)}
+              {lowStock.map(i => <p key={i.id} className="text-xs text-app-text bg-status-warning/10 rounded px-2 py-1">{i.code} — {i.name} ({i.stock}/{i.reorder_level})</p>)}
             </div>
           )}
-          {warnings.warranty_expiring.length > 0 && (
+          {warrantyExpiring.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-xs font-semibold text-status-info flex items-center gap-1"><Clock className="w-3.5 h-3.5" />Warranty Expiring</p>
-              {warnings.warranty_expiring.map(i => <p key={i.id} className="text-xs text-app-text bg-status-info/10 rounded px-2 py-1">{i.code} — expires {new Date(i.warranty_expiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</p>)}
+              {warrantyExpiring.map(i => <p key={i.id} className="text-xs text-app-text bg-status-info/10 rounded px-2 py-1">{i.code} — expires {new Date(i.warranty_expiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</p>)}
             </div>
           )}
         </div>

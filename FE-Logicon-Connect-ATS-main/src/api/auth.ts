@@ -34,3 +34,15 @@ export async function logoutApi(): Promise<{ detail: string }> {
   return data
 }
 
+export interface FieldEmployeeLoginPayload {
+  org_id: number
+  employee_code: string
+  pin: string
+}
+
+export async function obtainFieldEmployeeToken(payload: FieldEmployeeLoginPayload): Promise<TokenPair> {
+  const { data } = await api.post<TokenPair>('/api/field-employee-token/', payload)
+  return data
+}
+
+

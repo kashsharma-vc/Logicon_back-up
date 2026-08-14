@@ -214,6 +214,14 @@ export async function shortlistCandidateForDemand(
   return res.data as HiringApplicationRow
 }
 
+export async function bulkShortlistCandidatesForDemand(
+  demandId: number,
+  payload: { candidate_ids: number[]; comment?: string },
+): Promise<{ created_count: number; skipped_count: number }> {
+  const res = await api.post(`/api/hiring/demands/${demandId}/bulk-shortlist-candidates/`, payload)
+  return res.data as { created_count: number; skipped_count: number }
+}
+
 export async function sendShortlistedToClientReview(
   demandId: number,
   payload: BulkSendToClientReviewInput,

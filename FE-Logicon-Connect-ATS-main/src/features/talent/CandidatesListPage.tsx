@@ -1,7 +1,9 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import {
   Briefcase,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   FileText,
   History,
@@ -14,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listCandidates, bulkGenerateResumes } from '@/api/talent'
-import { listJobRoles, type JobRoleRow } from '@/api/jobs'
+import { fetchAllJobRoles, type JobRoleRow } from '@/api/jobs'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
@@ -25,6 +27,7 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Drawer } from '@/components/ui/Drawer'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Spinner } from '@/components/ui/Spinner'
 import { ManualResumeIntakeDrawer } from '@/features/talent/ManualResumeIntakeDrawer'
 import { ProfileQualityIndicators } from '@/features/talent/ProfileQualityIndicators'
@@ -148,7 +151,10 @@ function PoolDocumentCard({ c, onOpen }: { c: CandidateRow; onOpen: () => void }
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-bold text-app-heading">{name}</h3>
           <p className="mt-0.5 truncate text-sm text-app-secondary">
-            {c.current_role?.trim() || 'Role not specified'}
+            {c.current_role?.trim() ||
+              (c.mapped_job_roles && c.mapped_job_roles.length > 0
+                ? c.mapped_job_roles.map((r) => r.name).join(', ')
+                : c.target_job_role_name?.trim() || 'Role not specified')}
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {/* Document status */}
@@ -188,12 +194,19 @@ function PoolDocumentCard({ c, onOpen }: { c: CandidateRow; onOpen: () => void }
               </Badge>
             )
           })()}
-          {c.target_job_role_name?.trim() && (
+          {c.mapped_job_roles && c.mapped_job_roles.length > 0 ? (
+            c.mapped_job_roles.map((r) => (
+              <Badge key={r.id || r.name} variant="info" className="gap-1 text-[10px]">
+                <Briefcase className="h-3 w-3" />
+                {r.name}
+              </Badge>
+            ))
+          ) : c.target_job_role_name?.trim() ? (
             <Badge variant="info" className="gap-1 text-[10px]">
               <Briefcase className="h-3 w-3" />
               {c.target_job_role_name.trim()}
             </Badge>
-          )}
+          ) : null}
           {c.latest_document_type && (
             <Badge variant="neutral" className="text-[10px]">
               {documentTypeLabel(c.latest_document_type)}
@@ -312,8 +325,8 @@ export function CandidatesListPage() {
     let cancelled = false
     void (async () => {
       try {
-        const res = await listJobRoles({ is_active: true, page: 1 })
-        if (!cancelled) setRoles(res.items)
+        const items = await fetchAllJobRoles()
+        if (!cancelled) setRoles(items)
       } catch {
         if (!cancelled) setRoles([])
       }
@@ -322,6 +335,33 @@ export function CandidatesListPage() {
       cancelled = true
     }
   }, [])
+
+  const allDropdownRoles = useMemo(() => {
+    const roleMap = new Map<number, { id: number; name: string }>()
+    for (const r of roles) {
+      if (r.id) roleMap.set(r.id, { id: r.id, name: r.name })
+    }
+    for (const c of rows) {
+      if (c.mapped_job_roles) {
+        for (const mr of c.mapped_job_roles) {
+          if (mr.id && !roleMap.has(mr.id)) {
+            roleMap.set(mr.id, { id: mr.id, name: mr.name })
+          }
+        }
+      }
+      if (c.target_job_role && c.target_job_role_name && !roleMap.has(c.target_job_role)) {
+        roleMap.set(c.target_job_role, { id: c.target_job_role, name: c.target_job_role_name })
+      }
+    }
+    return Array.from(roleMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [roles, rows])
+
+  const roleOptions = useMemo(() => {
+    return [
+      { value: '', label: 'Any role' },
+      ...allDropdownRoles.map((r) => ({ value: String(r.id), label: r.name })),
+    ]
+  }, [allDropdownRoles])
 
   useEffect(() => {
     if (lifecycle || availability || sourceType || journeyStatus) setMoreFiltersOpen(true)
@@ -366,7 +406,9 @@ export function CandidatesListPage() {
     const p = new URLSearchParams(params)
     if (value) p.set(key, value)
     else p.delete(key)
-    p.set('page', '1')
+    if (key !== 'page') {
+      p.set('page', '1')
+    }
     setParams(p, { replace: true })
   }
 
@@ -442,8 +484,8 @@ export function CandidatesListPage() {
             <Briefcase className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-lg font-bold text-app-text">{roles.length}</p>
-            <p className="text-[11px] text-app-subtle">Active Roles</p>
+            <p className="text-lg font-bold text-app-text">{allDropdownRoles.length}</p>
+            <p className="text-[11px] text-app-subtle">Available Roles</p>
           </div>
         </div>
       </div>
@@ -467,14 +509,15 @@ export function CandidatesListPage() {
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:w-[400px]">
-          <Select id="cand_role_map" label="Mapped role" value={mappedRole} onChange={(e) => setField('target_job_role', e.target.value)}>
-            <option value="">Any role</option>
-            {roles.map((r) => (
-              <option key={r.id} value={String(r.id)}>
-                {r.name}
-              </option>
-            ))}
-          </Select>
+          <SearchableSelect
+            id="cand_role_map"
+            label="Mapped role"
+            value={mappedRole}
+            onChange={(val) => setField('target_job_role', val)}
+            options={roleOptions}
+            placeholder="Any role"
+            searchPlaceholder="Search 300+ roles..."
+          />
           <Select id="cand_doc" label="Document type" value={documentType} onChange={(e) => setField('document_type', e.target.value)}>
             {DOCUMENT_TYPE_FILTER_OPTIONS.map((o) => (
               <option key={o.value || 'all'} value={o.value}>
@@ -608,6 +651,47 @@ export function CandidatesListPage() {
             {rows.map((c) => (
               <PoolDocumentCard key={c.id} c={c} onOpen={() => navigate(`/candidates/${c.id}`)} />
             ))}
+          </div>
+
+          {/* Pagination */}
+          <div className="flex flex-col items-center justify-between gap-3 border-t border-app-border pt-4 sm:flex-row">
+            <p className="text-xs text-app-subtle">
+              Page <span className="font-semibold text-app-text">{page}</span>
+              {count != null ? (
+                <>
+                  {' '}of <span className="font-semibold text-app-text">{Math.max(1, Math.ceil(count / 50))}</span>
+                </>
+              ) : null}
+              <span className="ml-2 text-app-subtle">
+                (Showing <span className="font-semibold text-app-text">{rows.length}</span>
+                {count != null ? ` of ${count}` : ''} candidates)
+              </span>
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-9 px-3"
+                disabled={page <= 1}
+                onClick={() => setField('page', String(page - 1))}
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" aria-hidden />
+                Prev
+              </Button>
+              <span className="rounded bg-app-muted px-3 py-1 text-xs font-semibold text-app-text">
+                Page {page}
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-9 px-3"
+                disabled={count != null ? page >= Math.ceil(count / 50) : rows.length < 50}
+                onClick={() => setField('page', String(page + 1))}
+              >
+                Next
+                <ChevronRight className="ml-1 h-4 w-4" aria-hidden />
+              </Button>
+            </div>
           </div>
         </>
       )}

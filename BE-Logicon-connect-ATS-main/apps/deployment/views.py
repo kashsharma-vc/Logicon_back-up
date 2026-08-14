@@ -13,6 +13,8 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
+
 
 from apps.access.permissions import HasCapability
 from apps.access.querysets import (
@@ -83,17 +85,52 @@ class EmployeeViewSet(ScopedReadOnlyModelViewSet):
     search_fields = ['employee_code', 'first_name', 'last_name', 'phone', 'email']
 
     action_required_capabilities = {
-        'list':       ['employee.read'],
-        'retrieve':   ['employee.read'],
-        'suspend':    ['employee.update', 'employee.manage', 'deployment.manage'],
-        'reactivate': ['employee.update', 'employee.manage', 'deployment.manage'],
-        'exit':       ['employee.update', 'employee.manage', 'deployment.manage'],
+        'list':            ['employee.read'],
+        'retrieve':        ['employee.read'],
+        'suspend':         ['employee.update', 'employee.manage', 'deployment.manage'],
+        'reactivate':      ['employee.update', 'employee.manage', 'deployment.manage'],
+        'exit':            ['employee.update', 'employee.manage', 'deployment.manage'],
+        'reset_field_pin': ['employee.update', 'employee.manage', 'deployment.manage'],
     }
 
     def get_required_capability(self):
         # Compatibility for HasCapability if ever combined; primary check is HasAnyCapabilityForAction.
         caps = self.action_required_capabilities.get(self.action) or []
         return caps[0] if caps else None
+
+    @action(detail=True, methods=['post'], url_path='reset_field_pin')
+    def reset_field_pin(self, request, pk=None):
+        employee = self.get_object()
+        from apps.notifications.sms_service import generate_secure_field_pin, send_field_credentials_notification
+        from .models import FieldProvisioningLog
+        import hashlib
+        import secrets
+
+        raw_pin = generate_secure_field_pin()
+        employee.set_field_pin(raw_pin)
+        employee.field_is_locked = False
+        employee.field_login_failed_attempts = 0
+        employee.save(update_fields=['field_pin_hash', 'field_is_locked', 'field_login_failed_attempts', 'updated_at'])
+
+        send_field_credentials_notification(employee, raw_pin)
+
+        idempotency_key = hashlib.sha256(f"{employee.id}:{secrets.token_hex(8)}:pin_reset".encode('utf-8')).hexdigest()
+        FieldProvisioningLog.objects.create(
+            employee=employee,
+            action='pin_reset',
+            status='success',
+            idempotency_key=idempotency_key[:64],
+            error_detail=f'PIN reset by user #{request.user.id}',
+        )
+
+        return Response({
+            'status': 'success',
+            'detail': f'Field PIN reset successfully for employee {employee.employee_code}. Credentials dispatched via SMS.',
+            'employee_code': employee.employee_code,
+            'pin': raw_pin,
+        }, status=status.HTTP_200_OK)
+
+
 
     @action(detail=True, methods=['post'], url_path='suspend')
     def suspend(self, request, pk=None):
@@ -147,11 +184,13 @@ class SiteDeploymentViewSet(ScopedReadOnlyModelViewSet):
         'cancel':   ['site_deployment.update', 'site_deployment.manage', 'deployment.manage'],
         'complete': ['site_deployment.update', 'site_deployment.manage', 'deployment.manage'],
         'transfer': ['site_deployment.update', 'site_deployment.manage', 'deployment.manage'],
+        'retry_fieldsense_provisioning': ['site_deployment.update', 'site_deployment.manage', 'deployment.manage'],
     }
 
     def get_required_capability(self):
         caps = self.action_required_capabilities.get(self.action) or []
         return caps[0] if caps else None
+
 
     @action(detail=True, methods=['post'], url_path='activate')
     def activate(self, request, pk=None):
@@ -235,6 +274,14 @@ class SiteDeploymentViewSet(ScopedReadOnlyModelViewSet):
             ).data,
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='retry-fieldsense-provisioning')
+    def retry_fieldsense_provisioning(self, request, pk=None):
+        deployment = self.get_object()
+        from .tasks import provision_employee_in_fieldsense
+        provision_employee_in_fieldsense.delay(deployment.employee_id, deployment.id)
+        return Response({'detail': 'Provisioning task re-queued successfully.'}, status=status.HTTP_200_OK)
+
+
 
 # ─── DeploymentHistoryViewSet (read-only) ─────────────────────────────────────
 
@@ -250,4 +297,54 @@ class DeploymentHistoryViewSet(ScopedReadOnlyModelViewSet):
     required_capability = 'deployment.read'
     scope_filter = filter_deployment_history_for_user
     filterset_fields = ['org', 'employee', 'deployment', 'action_type']
+
+
+from .models import FieldProvisioningLog
+from .serializers import FieldProvisioningLogSerializer
+
+
+class FieldProvisioningLogViewSet(ScopedReadOnlyModelViewSet):
+    queryset = FieldProvisioningLog.objects.select_related('employee').order_by('-created_at')
+    serializer_class = FieldProvisioningLogSerializer
+    permission_classes = [IsAuthenticated, HasCapability]
+    required_capability = 'deployment.read'
+    filterset_fields = ['employee', 'action', 'status']
+    search_fields = ['idempotency_key', 'error_detail', 'employee__employee_code']
+
+
+class FieldSenseStatusView(APIView):
+    """
+    Internal monitoring status endpoint for FieldSense integration health.
+    """
+    permission_classes = [IsAuthenticated, HasCapability]
+    required_capability = 'deployment.read'
+
+    def get(self, request):
+        pending_count = FieldProvisioningLog.objects.filter(status='pending').count()
+        failed_count = FieldProvisioningLog.objects.filter(status='failed').count()
+        last_success = (
+            FieldProvisioningLog.objects.filter(status='success')
+            .order_by('-updated_at')
+            .values_list('updated_at', flat=True)
+            .first()
+        )
+
+        worker_status = "healthy"
+        try:
+            from config.celery import app as celery_app
+            inspector = celery_app.control.inspect(timeout=1.0)
+            ping_res = inspector.ping()
+            if not ping_res:
+                worker_status = "degraded (no worker ping response)"
+        except Exception:
+            worker_status = "unknown"
+
+        return Response({
+            'pending_provisioning_count': pending_count,
+            'failed_provisioning_count': failed_count,
+            'last_successful_provisioning_at': last_success.isoformat() if last_success else None,
+            'celery_worker_status': worker_status,
+        })
+
+
     search_fields = ['employee__employee_code', 'employee__first_name', 'employee__last_name']

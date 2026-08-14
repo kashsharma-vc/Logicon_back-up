@@ -134,6 +134,9 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 30,
+            },
         }
     }
 
@@ -231,18 +234,33 @@ SIMPLE_JWT = {
 }
 
 # ─── Celery ────────────────────────────────────────────────────────────────────
-# Default broker is in-memory so local dev/tests work without Redis.
-# Override CELERY_BROKER_URL in production .env to use Redis/RabbitMQ.
-CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='memory://')
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/1')
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TIMEZONE = TIME_ZONE
-# We track resume status in the DB — never need Celery result storage.
 CELERY_TASK_IGNORE_RESULT = True
-CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=DEBUG, cast=bool)
-CELERY_TASK_EAGER_PROPAGATES = config('CELERY_TASK_ALWAYS_EAGER', default=DEBUG, cast=bool)
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
+CELERY_TASK_EAGER_PROPAGATES = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
+
+from kombu import Queue
+CELERY_TASK_QUEUES = (
+    Queue('default', routing_key='default.#'),
+    Queue('fieldsense_provisioning', routing_key='fieldsense.#'),
+)
+CELERY_TASK_DEFAULT_QUEUE = 'default'
+CELERY_TASK_ROUTES = {
+    'apps.deployment.tasks.provision_employee_in_fieldsense': {
+        'queue': 'fieldsense_provisioning',
+        'routing_key': 'fieldsense.provision',
+    },
+    'apps.deployment.tasks.deprovision_employee_in_fieldsense': {
+        'queue': 'fieldsense_provisioning',
+        'routing_key': 'fieldsense.deprovision',
+    },
+}
+
 
 from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
@@ -259,4 +277,8 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=18, minute=30),  # Runs daily at 6:30 PM (18:30)
     },
 }
+
+FIELD_SENSES_INTERNAL_URL = config('FIELD_SENSES_INTERNAL_URL', default='http://127.0.0.1:8000')
+FIELD_SENSES_SERVICE_ACCOUNT_KEY = config('FIELD_SENSES_SERVICE_ACCOUNT_KEY', default='fieldsense-secret-service-key-2026')
+
 

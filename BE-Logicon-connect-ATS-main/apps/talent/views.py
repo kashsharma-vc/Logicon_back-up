@@ -65,7 +65,11 @@ class CandidateViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQueryse
     Candidate CRUD — org-scoped.
     list/retrieve: candidate.read  |  create: candidate.create  |  patch: candidate.update
     """
-    queryset = Candidate.objects.select_related('org', 'target_job_role').all()
+    queryset = Candidate.objects.select_related('org', 'target_job_role').prefetch_related(
+        'resumes__target_job_role',
+        'resume_import_items__batch__target_job_role',
+        'hiring_applications__job_role',
+    ).all()
     permission_classes = [IsAuthenticated, HasCapability]
     read_serializer_class = CandidateSerializer
     scope_filter = filter_candidates_for_user

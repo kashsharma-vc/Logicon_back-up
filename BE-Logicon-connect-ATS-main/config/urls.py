@@ -10,15 +10,16 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from apps.core.asset_vault import AssetVaultLoginLinkView
 
 
-from apps.accounts.views import EmailTokenObtainPairView
+from apps.accounts.views import EmailTokenObtainPairView, FieldEmployeeTokenView
 
 urlpatterns = [
     # Django Admin
     path('lms-console/', admin.site.urls),
 
-    # JWT Authentication (email + password)
+    # JWT Authentication (email + password & field employee PIN)
     path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/field-employee-token/', FieldEmployeeTokenView.as_view(), name='field_employee_token'),
     path(
         'api/integrations/asset-vault/login-link/',
         AssetVaultLoginLinkView.as_view(),

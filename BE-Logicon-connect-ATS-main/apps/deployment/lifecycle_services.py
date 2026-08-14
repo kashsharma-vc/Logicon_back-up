@@ -121,6 +121,13 @@ def activate_deployment(deployment, actor, *, note=''):
         deployment.status = 'active'
         deployment.save(update_fields=['status', 'updated_at'])
 
+        raw_pin = None
+        if not employee.field_pin_hash:
+            from apps.notifications.sms_service import generate_secure_field_pin
+            raw_pin = generate_secure_field_pin()
+            employee.set_field_pin(raw_pin)
+            employee.save(update_fields=['field_pin_hash', 'field_login_failed_attempts', 'field_is_locked'])
+
         _record_history(
             employee=employee,
             deployment=deployment,
@@ -135,7 +142,23 @@ def activate_deployment(deployment, actor, *, note=''):
             note=note,
         )
 
+        from .tasks import provision_employee_in_fieldsense
+        emp_id = employee.id
+        dep_id = deployment.id
+        if raw_pin:
+            from apps.notifications.sms_service import send_field_credentials_notification
+            transaction.on_commit(lambda: send_field_credentials_notification(employee, raw_pin))
+        def _dispatch_provisioning():
+            try:
+                provision_employee_in_fieldsense(emp_id, dep_id)
+            except Exception as e:
+                logger.warning("Provisioning dispatch exception: %s", e)
+
+        transaction.on_commit(_dispatch_provisioning)
+
     return deployment
+
+
 
 
 def cancel_deployment(deployment, actor, *, note=''):
@@ -388,7 +411,13 @@ def suspend_employee(employee, actor, *, note=''):
             metadata={'closed_deployments': closed},
         )
 
+        from .tasks import deprovision_employee_in_fieldsense
+        emp_id = employee.id
+        reason_str = note or 'employee_suspended'
+        transaction.on_commit(lambda: deprovision_employee_in_fieldsense.delay(emp_id, reason_str))
+
     return employee
+
 
 
 def reactivate_employee(employee, actor, *, note=''):
@@ -450,4 +479,10 @@ def exit_employee(employee, actor, *, exited_on=None, note=''):
             },
         )
 
+        from .tasks import deprovision_employee_in_fieldsense
+        emp_id = employee.id
+        reason_str = note or 'employee_exited'
+        transaction.on_commit(lambda: deprovision_employee_in_fieldsense.delay(emp_id, reason_str))
+
     return employee
+

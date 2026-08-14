@@ -192,51 +192,62 @@ def _safe_decimal(value):
 
 
 def _save_match_results(demand, results, user):
+    if not results:
+        return {}
+
     from apps.hiring.models import CandidateMatchResult
+    from django.db import transaction
 
     org = demand.mrf.org
     saved_ids = {}
+    candidate_ids = [r['candidate'].pk for r in results]
+    created_by_user = user if user and getattr(user, 'is_authenticated', False) else None
 
-    for result in results:
-        candidate = result['candidate']
-        bd = result['score_breakdown']
-
-        defaults = {
-            'org': org,
-            'final_score': Decimal(str(result['score'])),
-            'match_score': Decimal(str(result['score'])),
-            'role_score': Decimal(str(bd['role'])),
-            'skill_score': Decimal(str(bd['skills'])),
-            'experience_score': Decimal(str(bd['experience'])),
-            'location_score': Decimal(str(bd['location'])),
-            'availability_score': Decimal(str(bd['availability'])),
-            'matched_skills': result['matched_skills'],
-            'missing_skills': result['missing_skills'],
-            'match_reason': result['reasons'],
-            'warnings': result['warnings'],
-            'match_details': bd,
-            'match_source': 'rules',
-            'is_auto_match': True,
-            'created_by': user,
-        }
-
-        existing = (
-            CandidateMatchResult.objects
-            .filter(candidate=candidate, mrf_line_item=demand)
-            .order_by('-created_at')
-            .first()
+    with transaction.atomic():
+        existing_qs = CandidateMatchResult.objects.filter(
+            candidate_id__in=candidate_ids,
+            mrf_line_item=demand,
         )
-        if existing:
-            for k, v in defaults.items():
-                setattr(existing, k, v)
-            existing.save(update_fields=list(defaults.keys()))
-            saved_ids[candidate.pk] = existing.pk
-        else:
-            created = CandidateMatchResult.objects.create(
-                candidate=candidate,
-                mrf_line_item=demand,
-                **defaults,
-            )
-            saved_ids[candidate.pk] = created.pk
+        existing_map = {}
+        for mr in existing_qs:
+            if mr.candidate_id not in existing_map:
+                existing_map[mr.candidate_id] = mr
+
+        for result in results:
+            candidate = result['candidate']
+            bd = result['score_breakdown']
+
+            defaults = {
+                'org': org,
+                'final_score': Decimal(str(result['score'])),
+                'match_score': Decimal(str(result['score'])),
+                'role_score': Decimal(str(bd['role'])),
+                'skill_score': Decimal(str(bd['skills'])),
+                'experience_score': Decimal(str(bd['experience'])),
+                'location_score': Decimal(str(bd['location'])),
+                'availability_score': Decimal(str(bd['availability'])),
+                'matched_skills': result['matched_skills'],
+                'missing_skills': result['missing_skills'],
+                'match_reason': result['reasons'],
+                'warnings': result['warnings'],
+                'match_details': bd,
+                'match_source': 'rules',
+                'is_auto_match': True,
+                'created_by': created_by_user,
+            }
+
+            existing = existing_map.get(candidate.pk)
+            if existing:
+                for k, v in defaults.items():
+                    setattr(existing, k, v)
+                existing.save(update_fields=list(defaults.keys()))
+                saved_ids[candidate.pk] = existing.pk
+            else:
+                created = CandidateMatchResult.objects.create(
+                    candidate=candidate,
+                    mrf_line_item=demand,
+                    **defaults,
+                )
+                saved_ids[candidate.pk] = created.pk
 
     return saved_ids

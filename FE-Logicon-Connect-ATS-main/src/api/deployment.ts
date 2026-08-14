@@ -47,6 +47,9 @@ export async function exitEmployee(id: number, payload: EmployeeExitInput = {}):
   return res.data as EmployeeRow
 }
 
+
+
+
 // ─── Site Deployments ─────────────────────────────────────────────────────────
 
 export interface ListSiteDeploymentsParams {
@@ -91,7 +94,13 @@ export async function transferDeployment(id: number, payload: DeploymentTransfer
   return res.data as DeploymentTransferResult
 }
 
+export async function resetFieldPin(employeeId: number): Promise<{ status: string; pin: string; employee_code?: string; message?: string }> {
+  const res = await api.post(`/api/deployment/employees/${employeeId}/reset_field_pin/`)
+  return res.data
+}
+
 // ─── Deployment History ───────────────────────────────────────────────────────
+
 
 export interface ListDeploymentHistoryParams {
   org?: number

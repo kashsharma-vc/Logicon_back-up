@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  fieldsense_provisioning_worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: celery -A config worker -Q fieldsense_provisioning --concurrency=4 --loglevel=INFO
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - FIELDSENSE_BASE_URL=http://fieldsense_backend:8000
+    depends_on:
+      - redis
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M

@@ -298,6 +298,32 @@ class SiteSurveyViewSet(ScopedModelViewSet):
     def structured(self, request, pk=None):
         """Return survey header + all 5 child tables grouped."""
         survey = self.get_object()
+
+        # 1. Auto-seed default template lines if they don't exist yet
+        if not survey.scope_answers.exists():
+            from apps.sales.services import seed_default_survey_lines
+            seed_default_survey_lines(survey)
+
+        # 2. Dynamically sync client_scope_site answers with the latest Lead and Site records
+        for ans in survey.scope_answers.filter(category='client_scope_site'):
+            val = None
+            if ans.field_key == 'site_name':
+                val = survey.site.site_name
+            elif ans.field_key == 'company_name':
+                val = survey.lead.client_name
+            elif ans.field_key == 'address':
+                val = survey.site.site_address
+            elif ans.field_key == 'contact_person_at_site':
+                val = survey.lead.client_contact_person
+            elif ans.field_key == 'contact_phone_fax_mobile':
+                val = survey.lead.client_phone
+            elif ans.field_key == 'ops_maintenance_in_scope':
+                val = survey.lead.requirement_details
+
+            if val is not None and ans.value_text != val:
+                ans.value_text = val
+                ans.save(update_fields=['value_text', 'updated_at'])
+
         data = SiteSurveyStructuredSerializer(
             {
                 'survey': survey,

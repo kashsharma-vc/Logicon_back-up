@@ -170,3 +170,20 @@ class DeploymentHistorySerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = fields
+
+
+from .models import FieldProvisioningLog
+
+
+class FieldProvisioningLogSerializer(serializers.ModelSerializer):
+    employee_code = serializers.CharField(source='employee.employee_code', read_only=True, default='')
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True, default='')
+
+    class Meta:
+        model = FieldProvisioningLog
+        fields = [
+            'id', 'employee', 'employee_code', 'employee_name', 'action',
+            'status', 'idempotency_key', 'attempts', 'error_detail',
+            'created_at', 'updated_at',
+        ]
+

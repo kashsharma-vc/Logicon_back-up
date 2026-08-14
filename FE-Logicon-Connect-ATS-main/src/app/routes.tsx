@@ -106,9 +106,13 @@ function HiringApplicationLegacyRedirect() {
   return <Navigate to={`/hiring/applications/${id}`} replace />
 }
 
+import { FieldEmployeeLoginPage } from '@/features/auth/FieldEmployeeLoginPage'
+
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  { path: '/field-login', element: <FieldEmployeeLoginPage /> },
   { path: '/set-password', element: <SetPasswordPage /> },
+
   { path: '/apply/:token', element: <ApplyPage /> },
   { path: '/proposal-response', element: <PublicProposalResponsePage /> },
   {
@@ -122,7 +126,7 @@ export const router = createBrowserRouter([
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'attendance-dashboard', element: <AttendanceDashboardPage /> },
           { path: 'field-tracking/*', element: <FieldTrackingPage /> },
-          
+
 
           // Inventory
           { path: 'inventory', element: <RequireCapability anyOf={[CAP.INVENTORY_READ]}><InventoryDashboardPage /></RequireCapability> },
@@ -621,5 +625,5 @@ export const router = createBrowserRouter([
     ],
   },
   { path: '*', element: <Navigate to="/dashboard" replace /> },
-  
+
 ])

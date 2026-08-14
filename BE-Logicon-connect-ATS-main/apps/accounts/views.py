@@ -229,3 +229,106 @@ class UserViewSet(ScopedModelViewSet):
         log_audit(self.request.user, 'user.delete', instance, request=self.request)
         instance.is_active = False
         instance.save(update_fields=['is_active'])
+
+
+from datetime import timedelta
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+from .serializers import FieldEmployeeTokenSerializer
+
+
+def generate_field_employee_tokens(employee, deployment):
+    """
+    Generates custom SimpleJWT refresh and access tokens for a deployed field employee.
+    Access TTL: 8 hours. Refresh TTL: 24 hours.
+    """
+    email = employee.email.strip() if employee.email and employee.email.strip() else f"{employee.employee_code.lower()}@logicon-employee.internal"
+    user_id = employee.user_id if employee.user_id else employee.id
+
+    refresh = RefreshToken()
+    refresh.set_exp(lifetime=timedelta(hours=24))
+
+    claims = {
+        'user_id': user_id,
+        'email': email,
+        'first_name': employee.first_name,
+        'last_name': employee.last_name,
+        'is_staff': False,
+        'user_type': 'field',
+        'field_access': True,
+        'field_role': 'EMPLOYEE',
+        'field_site_scope': [str(deployment.site_id)],
+        'deployment_site_id': deployment.site_id,
+        'logicon_employee_id': employee.id,
+        'logicon_deployment_id': deployment.id,
+    }
+
+    for key, val in claims.items():
+        refresh[key] = val
+
+    access = refresh.access_token
+    access.set_exp(lifetime=timedelta(hours=8))
+    for key, val in claims.items():
+        access[key] = val
+
+    return {
+        'access': str(access),
+        'refresh': str(refresh),
+    }
+
+
+class FieldEmployeeTokenView(APIView):
+    """
+    Authentication endpoint for deployed field employees accessing the standalone mobile app.
+    Authenticates via (org_id, employee_code, PIN). Returns access/refresh tokens + 60s single-use handoff code.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        import secrets
+        from django.core.cache import cache
+
+        serializer = FieldEmployeeTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        employee = serializer.validated_data['employee']
+        deployment = serializer.validated_data['deployment']
+
+        tokens = generate_field_employee_tokens(employee, deployment)
+
+        # Auto-provision employee into FieldSense if not yet provisioned
+        from apps.deployment.tasks import provision_employee_in_fieldsense
+        try:
+            provision_employee_in_fieldsense(employee.id, deployment.id)
+        except Exception as e:
+            logger.warning("Auto-provisioning during login failed: %s", e)
+
+        # Generate 60-second single-use opaque handoff code
+        code = secrets.token_hex(32)
+
+        cache.set(f"handoff:{code}", tokens, timeout=60)
+
+        # Register handoff code with FieldSense Backend so FieldSense BE can exchange it
+        fieldsense_internal_url = getattr(settings, 'FIELD_SENSES_INTERNAL_URL', 'http://127.0.0.1:8000').rstrip('/')
+        service_key = getattr(settings, 'FIELD_SENSES_SERVICE_ACCOUNT_KEY', 'fieldsense-secret-service-key-2026')
+
+        try:
+            import json
+            import urllib.request
+            req_data = json.dumps({"code": code, "tokens": tokens}).encode('utf-8')
+            req = urllib.request.Request(
+                f"{fieldsense_internal_url}/api/internal/register-handoff-code/",
+                data=req_data,
+                headers={"X-Service-Account-Key": service_key, "Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                pass
+        except Exception as e:
+            logger.warning("Failed to register handoff code with FieldSense BE: %s", e)
+
+        tokens['code'] = code
+        return Response(tokens, status=status.HTTP_200_OK)
+
+
+

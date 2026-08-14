@@ -60,6 +60,7 @@ export interface CandidateRow {
   target_job_role?: number | null
   target_job_role_name?: string | null
   target_job_role_code?: string | null
+  mapped_job_roles?: Array<{ id: number; name: string; code?: string }>
   created_at?: string
   updated_at?: string
   // Candidate journey fields (computed by backend)

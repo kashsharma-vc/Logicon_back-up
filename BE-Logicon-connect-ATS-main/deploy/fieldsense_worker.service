@@ -1,0 +1,24 @@
+[Unit]
+Description=FieldSense Celery Provisioning Worker
+After=network.target redis.service
+
+[Service]
+Type=forking
+User=logicon
+Group=logicon
+WorkingDirectory=/opt/logicon/backend
+ExecStart=/opt/logicon/backend/.venv/bin/celery -A config worker \
+    -Q fieldsense_provisioning \
+    --concurrency=4 \
+    --loglevel=INFO \
+    --logfile=/var/log/logicon/fieldsense_worker.log \
+    --pidfile=/var/run/logicon/fieldsense_worker.pid
+
+ExecStop=/opt/logicon/backend/.venv/bin/celery multi stopwait worker1 \
+    --pidfile=/var/run/logicon/fieldsense_worker.pid
+
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

@@ -199,7 +199,10 @@ export function CandidateDetailPage() {
             </div>
 
             <p className="mt-1 text-sm text-app-secondary">
-              {row.current_role?.trim() || 'Role not specified'}
+              {row.current_role?.trim() ||
+                (row.mapped_job_roles && row.mapped_job_roles.length > 0
+                  ? row.mapped_job_roles.map((r) => r.name).join(', ')
+                  : row.target_job_role_name?.trim() || 'Role not specified')}
             </p>
 
             {/* Contact info */}
@@ -226,12 +229,19 @@ export function CandidateDetailPage() {
 
             {/* Tags */}
             <div className="mt-2 flex flex-wrap gap-2">
-              {row.target_job_role_name?.trim() && (
+              {row.mapped_job_roles && row.mapped_job_roles.length > 0 ? (
+                row.mapped_job_roles.map((r) => (
+                  <Badge key={r.id || r.name} variant="info" className="gap-1.5">
+                    <Briefcase className="h-3 w-3" />
+                    {r.name}
+                  </Badge>
+                ))
+              ) : row.target_job_role_name?.trim() ? (
                 <Badge variant="info" className="gap-1.5">
                   <Briefcase className="h-3 w-3" />
                   {row.target_job_role_name.trim()}
                 </Badge>
-              )}
+              ) : null}
               {row.latest_document_type && (
                 <Badge variant="neutral">{documentTypeLabel(row.latest_document_type)}</Badge>
               )}

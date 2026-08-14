@@ -461,3 +461,82 @@ class TestSeedCreatesPermissions(RBACRuntimeBase):
         self.assertIn('mrf.read', caps)
         self.assertIn('workflow.config.read', caps)
         self.assertIn('workflow.config.manage', caps)
+
+
+class FieldSenseSSOCapabilitySecurityTests(TestCase):
+    """
+    Tests capability-driven FieldSense SSO access resolution:
+    - Future-proof: Any newly created role with 'field_tracking.read' capability automatically gets field_access=True.
+    - Security Guard: Non-ops roles (HR, Finance, Client Admin) get field_access=False.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.core.models import Organization, ScopeNode
+        from apps.sites.models import Client, SiteProfile
+        from apps.accounts.serializers import resolve_user_field_claims
+
+        cls.org, _ = Organization.objects.get_or_create(name='SSO Test Org', code='sso-test')
+        cls.root_scope, _ = ScopeNode.objects.get_or_create(
+            org=cls.org, code='sso-root',
+            defaults={'name': 'SSO Root', 'node_type': 'company', 'parent': None, 'depth': 0, 'path': 'sso-root', 'is_active': True}
+        )
+        cls.client, _ = Client.objects.get_or_create(
+            org=cls.org, code='CLI-99',
+            defaults={'name': 'Test Client'}
+        )
+        cls.site_scope, _ = ScopeNode.objects.get_or_create(
+            org=cls.org, code='site-99',
+            defaults={'name': 'Site 99', 'node_type': 'site', 'parent': cls.root_scope, 'depth': 1, 'path': 'sso-root/site-99', 'is_active': True}
+        )
+        cls.site_profile, _ = SiteProfile.objects.get_or_create(
+            org=cls.org, code='SITE-99',
+            defaults={'client': cls.client, 'scope_node': cls.site_scope, 'name': 'Site 99 Profile'}
+        )
+
+
+
+
+    def test_future_proof_new_role_capability_sso(self):
+        """A new role granted 'field_tracking.read' at a scope node automatically gets field_access=True and scoped site IDs."""
+        from apps.accounts.serializers import resolve_user_field_claims
+        from apps.access.capabilities import FIELD_TRACKING_READ
+
+        # 1. Create a brand new custom role
+        new_role, _ = AccessRole.objects.get_or_create(org=self.org, code='future_ops_lead', defaults={'name': 'Future Ops Lead', 'is_active': True})
+
+        # 2. Assign field_tracking.read permission to this new role
+        perm = get_or_create_permission(FIELD_TRACKING_READ)
+        AccessRolePermission.objects.get_or_create(role=new_role, permission=perm)
+
+        # 3. Create a user assigned to this new role at site_scope
+        user, _ = User.objects.get_or_create(username='future_lead@example.com', defaults={'email': 'future_lead@example.com', 'org': self.org, 'user_type': 'internal'})
+        UserRoleAssignment.objects.get_or_create(user=user, role=new_role, scope_node=self.site_scope)
+
+        # 4. Resolve claims with ZERO code changes
+        claims = resolve_user_field_claims(user)
+        self.assertTrue(claims['field_access'])
+        self.assertEqual(claims['field_role'], 'MANAGER')
+        self.assertIn(str(self.site_profile.id), claims['field_site_scope'])
+
+    def test_non_ops_roles_blocked_from_fieldsense_access(self):
+        """HR Admin, Finance Manager, and Client Admin accounts get field_access=False."""
+        from apps.accounts.serializers import resolve_user_field_claims
+
+        hr_role, _ = AccessRole.objects.get_or_create(org=self.org, code='hr_admin', defaults={'name': 'HR Admin', 'is_active': True})
+        fin_role, _ = AccessRole.objects.get_or_create(org=self.org, code='finance_manager', defaults={'name': 'Finance Manager', 'is_active': True})
+        client_role, _ = AccessRole.objects.get_or_create(org=self.org, code='client_admin', defaults={'name': 'Client Admin', 'is_active': True})
+
+        hr_user, _ = User.objects.get_or_create(username='hr@example.com', defaults={'email': 'hr@example.com', 'org': self.org, 'user_type': 'internal'})
+        fin_user, _ = User.objects.get_or_create(username='fin@example.com', defaults={'email': 'fin@example.com', 'org': self.org, 'user_type': 'internal'})
+        client_user, _ = User.objects.get_or_create(username='client@example.com', defaults={'email': 'client@example.com', 'org': self.org, 'user_type': 'client'})
+
+        UserRoleAssignment.objects.get_or_create(user=hr_user, role=hr_role, scope_node=self.root_scope)
+        UserRoleAssignment.objects.get_or_create(user=fin_user, role=fin_role, scope_node=self.root_scope)
+        UserRoleAssignment.objects.get_or_create(user=client_user, role=client_role, scope_node=self.root_scope)
+
+        self.assertFalse(resolve_user_field_claims(hr_user)['field_access'])
+        self.assertFalse(resolve_user_field_claims(fin_user)['field_access'])
+        self.assertFalse(resolve_user_field_claims(client_user)['field_access'])
+
+

@@ -1,98 +1,229 @@
-# Main Logicon ERP - Detailed System Architecture & Structure Documentation
+# Main Logicon ERP & FieldSense Platform — Detailed System Architecture (As-Built)
 
-This document provides an in-depth technical overview of the Main Logicon ERP system, detailing both its functional workflows and physical codebase structure.
-
----
-
-## 1. Directory Structure
-
-The Main Logicon ecosystem is split into two primary repositories (folders):
-`BE-Logicon-connect-ATS-main` (Django Backend) and `FE-Logicon-Connect-ATS-main` (React Frontend).
-
-### 1.1 Backend Structure (`BE-Logicon-connect-ATS-main/apps/`)
-The backend is a modular Django application. Each major business domain is encapsulated in its own app:
-- `accounts/` & `access/`: Manages user identities, Role-Based Access Control (RBAC), and Capabilities.
-- `core/`: Common models (Organizations, Departments), base utilities, and SSO integrations (e.g., `asset_vault.py`).
-- `sales/`: The CRM module handling Leads, Site Surveys, and Proposals.
-- `hiring/`, `talent/`, `mrf/`, `intake/`: The Applicant Tracking System (ATS). Manages Manpower Requisition Forms (MRFs), candidate sourcing, pipelines, and offers.
-- `inventory/`: The execution backend for inventory, processing stock movements and schema definitions.
-- `workflow/`: The centralized Workflow Engine handling approvals and Turnaround Time (TAT) SLA monitoring.
-- `budgets/`, `wages/`: Financial modeling, calculating margins, markups, and minimum wages.
-- `deployment/`, `sites/`: Post-hire operations and physical site management.
-
-### 1.2 Frontend Structure (`FE-Logicon-Connect-ATS-main/src/`)
-The frontend is a Vite + React + TypeScript application strictly organized by feature domains:
-- `app/routes.tsx`: The central router controlling all authenticated and public paths.
-- `features/auth/`: Login, capability enforcement (`RequireCapability`), and session management.
-- `features/sales/`: UI for leads, site role requirements (SRR), and proposal workspaces.
-- `features/hiring/` & `features/talent/`: Interview pipelines, MRF creation, candidate management.
-- `features/inventory/`: The Inventory Operations Execution engine (`InventoryOperationsPage.tsx`), rendering dynamic forms based on backend schemas.
-- `features/integrations/`: Houses `AssetVaultPage.tsx`, the iframe container that SSO-authenticates the user into Field Sense.
+This document provides the authoritative technical overview of the **Main Logicon ERP/ATS** and **FieldSense Mobile Workforce Management System**, detailing the post-Phase 0–4 as-built architecture, entitlement matrices, JWT security schemas, transactional lifecycle workflows, and database schemas.
 
 ---
 
-## 2. Login & Access Control
-The system uses a robust, capability-driven role-based access control (RBAC) architecture to securely separate internal users from external clients.
+## 1. Directory & System Architecture Overview
 
-### Authentication Flow
-- **Identities**: Users are centrally managed. Internal employees and external client stakeholders have discrete roles.
-- **Capabilities over Roles**: Instead of hardcoding permissions to generic roles like "Admin" or "Sales", the system uses **Capabilities** (e.g., `CAP.ASSET_VAULT_ACCESS`, `DEPLOYMENT_ANY`). This allows highly granular access control to specific UI routes and API endpoints.
-- **User Portals**: When a client user logs in, they only see Client-facing features (like Proposal Responses or Client Staff Views), whereas internal users see dashboards tailored to their specific department (HR, Finance, Operations, Sales).
+The platform consists of two integrated product ecosystems:
+1. **Main Logicon ERP/ATS**: Enterprise Resource Planning & Applicant Tracking System (`BE-Logicon-connect-ATS-main` Django backend on port 8001 + `FE-Logicon-Connect-ATS-main` React frontend on port 5173).
+2. **FieldSense Platform**: Field Tracking & Workforce Operations System (`backend` Django backend on port 8000 + `frontend` PWA frontend on port 8080).
 
----
-
-## 3. CRM (Sales & SRR)
-The CRM module drives the acquisition of new clients and the expansion of existing sites. It follows a structured pipeline: **Lead → Site Survey → Role Requirements → Proposal → Negotiation**.
-
-### Core Flow & Database Entities
-1. **Lead Creation (`SalesLead`)**: Sales representatives create leads for new clients, site expansions, or renewals.
-2. **Site Survey**: Before quoting a price, Operations and Sales conduct a site survey to determine the exact ground realities and feasibility of the request.
-3. **Site Role Requirements (SRR)**: Based on the survey, the exact manpower requirements are defined. For example, "Site A requires 5 Security Guards and 1 Supervisor". This SRR acts as the **absolute source of truth** for all future hiring limits.
-4. **Budgeting & Proposal Generation**: The system generates a commercial budget combining the manpower costs (Wages) and required inventory costs (Uniforms, Equipment) plus predefined markups.
-5. **Client Negotiation**: The proposal is sent to the client via a public link (`PublicProposalResponsePage`). The client can approve, reject, or request revisions directly through the portal.
-6. **Client Onboarding & Mobilisation**: Once the proposal is won, the site goes into Mobilisation, preparing the ground for active operations.
-
----
-
-## 4. ATS (Applicant Tracking System) & Hiring
-The ATS module is directly integrated with the CRM's Site Role Requirements. You cannot hire arbitrarily; all hiring is strictly controlled by approved Manpower Requisition Forms (MRFs).
-
-### Core Flow & Database Entities
-1. **Manpower Requisition Form (`ManpowerRequest` / `MRFLineItem`)**: 
-   - A site manager or client requests staff by raising an MRF. 
-   - The system strictly validates the MRF against the approved **Site Role Requirements (SRR)**. If a site is only approved for 5 guards, the system will block an MRF requesting a 6th guard unless an explicit "Headcount Increase" flow is triggered.
-   - The MRF goes through an internal (and sometimes client) approval workflow via the centralized Workflow Engine.
-2. **Talent Sourcing**: Candidates submit applications via public Intake forms, entering the `Candidate` database.
-3. **Hiring Application (`HiringApplication`)**: A candidate is officially linked to an approved MRF Line Item.
-4. **Pipeline Execution (`PipelineStage`)**: The candidate moves through dynamic, org-specific pipeline stages:
-   - *Screening / Shortlisting*
-   - *Interviews* (Internal and Client Review)
-   - *Selection*
-   - *Offer Released / Accepted*
-5. **Deployment**: Once the offer is accepted, the candidate transitions from an external applicant to a deployed Employee linked to the specific Site.
+```
++-------------------------------------------------------------------------------+
+|                            LOGICON ERP & ATS                                  |
+|                                                                               |
+|  +---------------------------+             +-------------------------------+  |
+|  | FE-Logicon-Connect (5173) |             | BE-Logicon-Connect (8001)     |  |
+|  | - React 18 + Vite         | <---------> | - Django 5.x + DRF            |  |
+|  | - Route Guard (CAP)       |   REST API  | - JWT Claim Serializer        |  |
+|  | - Standalone /field-login |             | - Celery Async Tasks          |  |
+|  +---------------------------+             +---------------+---------------+  |
++-----------------------------------------------------------|-------------------+
+                                                            |
+                                        Service Token Push  |  SSO Iframe & PWA Handoff
+                                        POST /api/internal/ |  POST /api/token/
+                                                            |
++-----------------------------------------------------------v-------------------+
+|                            FIELDSENSE PLATFORM                                |
+|                                                                               |
+|  +---------------------------+             +-------------------------------+  |
+|  | FieldSense Frontend (8080)|             | FieldSense Backend (8000)     |  |
+|  | - React + PWA Manifest    | <---------> | - SharedJWTAuthentication     |  |
+|  | - Mobile Employee Portal  |   REST API  | - Push & JIT Engine           |  |
+|  | - URL Token Sanitization  |             | - Redis JTI Blocklist         |  |
+|  +---------------------------+             +-------------------------------+  |
++-------------------------------------------------------------------------------+
+```
 
 ---
 
-## 5. Inventory & Logistics
-The Inventory system is designed as a state-of-the-art **Execution Engine**. Rather than hardcoding approval chains into the frontend, it relies on a dynamic configuration backend.
+## 2. Entitlement Matrix & Role-Based Access Control (RBAC)
 
-### Architecture: Configuration vs. Execution
-- **Master Setup (Configuration Engine)**: Administrators configure the rules of the inventory system. They define:
-  - **Request Types**: Defines what kind of requests can be made (e.g., "IT Asset", "Uniform Request") and attaches a dynamic JSON `form_schema` and a specific `workflow_template`.
-  - **Policies**: Business rules (e.g., "Approval Required", "Warranty Tracking").
-  - **Assignment Rules**: Who can receive the items (Employees, Sites, Clients).
-- **Inventory Operations (Execution Engine)**: The frontend operations page (`InventoryOperationsPage`) is entirely dynamic. It fetches the Request Types and automatically renders the appropriate UI forms based on the `form_schema`. It has zero hardcoded business logic.
+Access to FieldSense features is governed by a unified entitlement model driven by Logicon's JWT claims.
 
-### Request Flow
-1. **User Request**: An employee requests a new laptop. The UI renders the form strictly based on the "IT Asset" `form_schema`.
-2. **Workflow Engine**: Upon submission, the system triggers the specific `WorkflowInstance` tied to that Request Type. 
-3. **Approvals**: The request is routed to the appropriate managers or IT admins for approval based on the workflow template.
-4. **Stock Movement (`StockMovement`)**: Once fully approved, the system logs an immutable stock movement (e.g., 'issue', 'transfer', 'adjustment'), physically assigning the asset to the employee and decrementing warehouse stock.
+### 2.1 Entitlement Matrix Across Access Channels
+
+| Role Code | `field_access` | `field_role` | `field_site_scope` | Iframe SSO Access | Mobile PWA Access | Internal API Access |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `admin` | `True` | `ADMIN` | `["*"]` | **ALLOW** (Full Admin) | **ALLOW** | **DENY** (Requires Service Token) |
+| `operations_manager` | `True` | `MANAGER` | Assigned Sites | **ALLOW** (Scoped) | **ALLOW** | **DENY** |
+| `operations_executive` | `True` | `MANAGER` | Assigned Sites | **ALLOW** (Scoped) | **ALLOW** | **DENY** |
+| `site_manager` | `True` | `MANAGER` | Site Specific | **ALLOW** (Scoped) | **ALLOW** | **DENY** |
+| `field_supervisor` | `True` | `MANAGER` | Site Specific | **ALLOW** (Scoped) | **ALLOW** | **DENY** |
+| `sales_manager` | `True` | `SALES` | Assigned Scope | **ALLOW** (CRM/Territory) | **ALLOW** | **DENY** |
+| `sales_executive` | `True` | `SALES` | Assigned Scope | **ALLOW** (CRM/Territory) | **ALLOW** | **DENY** |
+| Deployed `EMPLOYEE` | `True` | `EMPLOYEE` | Active Site | **DENY** (Route Guarded) | **ALLOW** (PIN Login) | **DENY** |
+| Non-Entitled User | `False` | `null` | `[]` | **DENY** (401/403) | **DENY** | **DENY** |
+| Service Account | N/A | N/A | N/A | N/A | N/A | **ALLOW** (Service JWT) |
 
 ---
 
-## 6. Centralized Workflow Engine
-Underpinning CRM approvals, ATS MRFs, and Inventory Requests is the `apps.workflow` module. 
-- It allows administrators to build dynamic, multi-step approval templates (e.g., Step 1: HR Approval, Step 2: Finance Approval).
-- It tracks strict Turnaround Times (TAT) and Service Level Agreements (SLAs) for every step.
-- It provides a unified "My Tasks" inbox (`MyTasksPage`) where managers can see pending approvals across all modules (Inventory, MRFs, Proposals) in one place.
+## 3. JWT Claim Schema & Authentication Engine
+
+### 3.1 Custom JWT Claim Structure
+
+Logicon's `EmailTokenObtainPairSerializer` computes and emits four mandatory claims in every issued JWT access token:
+
+```json
+{
+  "token_type": "access",
+  "exp": 1785768000,
+  "iat": 1785681600,
+  "jti": "8f3b2d1c9e4a",
+  "user_id": 1042,
+  "email": "ops.manager@logicon.com",
+  "is_staff": false,
+  "field_access": true,
+  "field_role": "MANAGER",
+  "field_site_scope": ["SITE-101", "SITE-102"],
+  "deployment_site_id": null
+}
+```
+
+### 3.2 FieldSense `SharedJWTAuthentication` Execution Flow
+
+```
+Incoming Request HTTP Authorization: Bearer <JWT>
+                    │
+                    ▼
+     Validate Cryptographic Signature (HS256)
+                    │
+                    ├─► [INVALID] ──► Raise AuthenticationFailed (401)
+                    │
+                    ▼
+       Check Redis JTI Blocklist
+                    │
+                    ├─► [REVOKED] ──► Raise AuthenticationFailed (401)
+                    │
+                    ▼
+       Inspect `field_access` Claim
+                    │
+                    ├─► [FALSE] ────► Raise AuthenticationFailed (401)
+                    │
+                    ├─► [ABSENT] ───► Legacy Fallback (is_staff / user_type)
+                    │
+                    ▼
+      Attach Claims & Scope to Request
+      request.field_role = payload['field_role']
+      request.field_site_scope = payload['field_site_scope']
+```
+
+---
+
+## 4. Operational Workflows & Sequence Diagrams
+
+### 4.1 Iframe SSO (Ops / Admin / Sales)
+
+```
+User (Browser)               Logicon Frontend              Logicon Backend             FieldSense Backend
+      │                             │                             │                             │
+      ├─ Navigate /field-tracking ─►│                             │                             │
+      │                             ├─ GET /api/token/ ──────────►│                             │
+      │                             │  (With user credentials)    │                             │
+      │                             │◄─ Return JWT + Claims ──────┤                             │
+      │                             │   (field_access=true)       │                             │
+      ├─ Render <iframe src= ───────┴─────────────────────────────┴────────────────────────────►│
+      │  "http://fieldsense:8000/?token=JWT&embedded=true">                                     │
+      │                                                                                         │
+      │◄─ Validate Token, Apply CSP frame-ancestors, Render Scoped Dashboard ───────────────────┤
+```
+
+### 4.2 Standalone Mobile PIN Login & PWA Token Handoff
+
+```
+Field Worker (Mobile)        Logicon Frontend (/field-login)    Logicon Backend         FieldSense PWA (8080)
+      │                                    │                           │                          │
+      ├─ Submit OrgID + Code + PIN ───────►│                           │                          │
+      │                                    ├─ POST /field-employee ───►│                          │
+      │                                    │  -token/                  │                          │
+      │                                    │◄─ Return Access+Refresh ──┤                          │
+      │                                    │   (field_role=EMPLOYEE)   │                          │
+      ├─ Redirect to PWA ──────────────────┴───────────────────────────┴─────────────────────────►│
+      │  http://fieldsense:8080/?token=JWT                                                       │
+      │                                                                                          │
+      │◄─ SSOHandler consumes token, saves to sessionStorage, sanitizes URL bar ─────────────────┤
+      │◄─ Render EmployeePortal.tsx (Check-In / Visit Logs / Attendance) ───────────────────────┤
+```
+
+### 4.3 Hybrid Provisioning (Celery Push + JIT Fallback)
+
+```
+Logicon Lifecycle Hook          Logicon Celery Worker             FieldSense Backend
+         │                                │                                │
+         ├─ activate_deployment()         │                                │
+         │  (Inside DB transaction)       │                                │
+         ├─ transaction.on_commit() ─────►│                                │
+         │  Enqueue task                  ├─ POST /api/internal/ ─────────►│
+         │                                │  provision-employee/           ├─ Create Employee
+         │                                │  (Service Account Token)       │  & User Record
+         │                                │◄─ HTTP 201 Created ────────────┤  Assign Scope
+```
+
+### 4.4 Employee Offboarding & Instant Revocation
+
+```
+Logicon Lifecycle Hook          Logicon Celery Worker             FieldSense Backend            Redis Blocklist
+         │                                │                                │                           │
+         ├─ exit_employee()               │                                │                           │
+         ├─ transaction.on_commit() ─────►│                                │                           │
+         │  Enqueue deprovision task      ├─ POST /api/internal/ ─────────►│                           │
+         │                                │  deprovision-employee/         ├─ accountStatus = False    │
+         │                                │                                ├─ Force Check-Out Shift    │
+         │                                │                                ├─ POST /revoke-token/ ────►│ Store JTI in Redis
+         │                                │◄─ HTTP 200 OK ─────────────────┴───────────────────────────┤ TTL = Expiration
+```
+
+---
+
+## 5. Database Schema Extensions
+
+### 5.1 Logicon Backend (`apps/deployment/models.py`)
+
+#### Model: `Employee`
+* `field_pin_hash`: `CharField(max_length=128, blank=True)` — Bcrypt hash of 6-digit PIN.
+* `field_provisioned_at`: `DateTimeField(null=True, blank=True)` — Provisioning timestamp.
+* `field_provisioning_status`: `CharField(choices=['pending', 'provisioned', 'failed', 'deprovisioned'])`
+* `field_login_failed_attempts`: `IntegerField(default=0)` — Failure tracker for PIN brute-force defense.
+* `field_is_locked`: `BooleanField(default=False)` — Account lockout flag.
+
+#### Model: `FieldProvisioningLog`
+* `employee`: `ForeignKey(Employee)`
+* `idempotency_key`: `CharField(max_length=64, unique=True)` — `SHA256(employee_id:deployment_id:action)`
+* `action`: `CharField(choices=['provision', 'deprovision', 'pin_reset'])`
+* `status`: `CharField(choices=['pending', 'success', 'failed'])`
+* `attempts`: `IntegerField(default=1)`
+* `error_detail`: `TextField(blank=True)`
+
+---
+
+### 5.2 FieldSense Backend (`backend/core/models.py`)
+
+#### Model: `Employee`
+* `logicon_employee_id`: `IntegerField(null=True, blank=True, db_index=True)` — Foreign key mapping to Logicon.
+* `logicon_deployment_id`: `IntegerField(null=True, blank=True)` — Active deployment ID.
+* `current_site_scope`: `JSONField(default=list)` — Array of site IDs assigned to worker.
+
+#### Model: `ProvisioningLog`
+* `idempotency_key`: `CharField(max_length=64, unique=True)`
+* `action`: `CharField(max_length=32)`
+* `status`: `CharField(max_length=32)`
+
+---
+
+## 6. Risk Register Status (R1–R11)
+
+| Risk ID | Threat Description | Status | Verification & Resolution Control |
+| :--- | :--- | :---: | :--- |
+| **R1** | Unprotected route on `/field-tracking/*` | **RESOLVED** | Route guarded with `<RequireCapability anyOf={[CAP.FIELD_TRACKING_READ]} />` in `routes.tsx`. |
+| **R2** | Sales role conflict breaking production | **RESOLVED** | `sales_manager` and `sales_executive` mapped to `field_access=True, field_role='SALES'`. |
+| **R3** | Non-entitled user accessing FieldSense | **RESOLVED** | `SharedJWTAuthentication` enforces `field_access` claim gate before JIT logic. |
+| **R4** | Mobile PIN brute-forcing | **RESOLVED** | 10-attempt rate limiting and account lockout (`field_is_locked=True`) on `/api/field-employee-token/`. |
+| **R5** | Plaintext PIN leak in database/logs | **RESOLVED** | Raw 6-digit PIN is bcrypt-hashed into `field_pin_hash`; plaintext PIN is never logged or stored. |
+| **R6** | Unauthorized access to internal push API | **RESOLVED** | `/api/internal/*` guarded by `ServiceAccountAuthentication` enforcing `user_type='service'` and IP restrictions. |
+| **R7** | Clickjacking / Untrusted iframe embedding | **RESOLVED** | `SecurityHeadersMiddleware` sets CSP `frame-ancestors` restricted strictly to Logicon origin (`http://localhost:5173`). |
+| **R8** | Stale site scope window post-transfer | **RESOLVED** | Real-time scope validation in `check_site_scope_validity()` + instant JTI Redis blocklist revocation. |
+| **R9** | In-memory Celery broker in production | **RESOLVED** | Broker configured to Redis (`redis://localhost:6379/0`), queue `fieldsense_provisioning` separated with dedicated concurrency. |
+| **R10** | Unmonitored dead-letter task failures | **RESOLVED** | Sentry & PagerDuty webhook dispatcher (`apps/monitoring/alerts.py`) + `/api/deployment/fieldsense-status/` endpoint built. |
+| **R11** | Locked-out field worker recovery gap | **RESOLVED** | HR-facing `reset-field-pin` endpoint added to `EmployeeViewSet` with capability guard `employee.update` and audit logging. |

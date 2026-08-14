@@ -293,7 +293,11 @@ class InventoryItemViewSet(ModelViewSet):
             warranty_expiry__gte=timezone.now().date()
         ).values('id', 'code', 'name', 'warranty_expiry')[:10]
 
-        return Response({'status': 'Stock adjustments applied'}, status=status.HTTP_200_OK)
+        return Response({
+            'low_stock': list(low_stock_items),
+            'out_of_stock': list(out_of_stock_items),
+            'warranty_expiring': list(warranty_expiring_items)
+        }, status=status.HTTP_200_OK)
 
 # ─── New Workflow-Driven Architecture Views ───────────────────────────────────
 

@@ -7,7 +7,6 @@ from .views import (
     ManualResumeIntakeView,
 )
 from .bulk_resume_views import BulkExcelResumeGenerateView
-from .bulk_resume_views import BulkExcelResumeGenerateView
 
 router = DefaultRouter()
 router.register('candidates', CandidateViewSet, basename='candidate')
@@ -19,7 +18,6 @@ router.register('parsed-resumes', ParsedResumeViewSet, basename='parsed-resume')
 
 urlpatterns = [
     path('resumes/bulk-generate/', BulkExcelResumeGenerateView.as_view(), name='resume-bulk-generate'),
-    path('', include(router.urls)),
     path('manual-resume-intake/', ManualResumeIntakeView.as_view(), name='manual-resume-intake'),
-    path('resumes/bulk-generate/', BulkExcelResumeGenerateView.as_view(), name='resume-bulk-generate'),
+    path('', include(router.urls)),
 ]

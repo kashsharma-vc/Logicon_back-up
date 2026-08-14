@@ -158,6 +158,94 @@ class SetPasswordSerializer(serializers.Serializer):
         return user
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_user_field_claims(user):
+    """
+    Computes field_access, field_role, field_site_scope, and deployment_site_id for user.
+    Uses capability system and UserRoleAssignment scope resolution:
+    - field_access: "field_tracking.read" in get_user_capabilities(user)
+    - field_role: derived from UserRoleAssignment role codes (ADMIN, MANAGER, SALES, EMPLOYEE)
+    - field_site_scope: ["*"] if ADMIN or assigned to root scope node; else resolved scope subtree IDs
+    """
+    from apps.access.capabilities import get_user_capabilities, FIELD_TRACKING_READ
+    from apps.access.models import UserRoleAssignment
+    from apps.access.scope import get_user_scope_nodes
+    from apps.sites.models import SiteProfile
+    from django.db.models import Q
+
+    is_superuser = getattr(user, 'is_superuser', False)
+    caps = set(get_user_capabilities(user))
+
+    # 1. field_access computed EXACTLY via capability system
+    field_access = is_superuser or FIELD_TRACKING_READ in caps
+
+    if not field_access:
+        return {
+            'field_access': False,
+            'field_role': None,
+            'field_site_scope': [],
+            'deployment_site_id': None,
+        }
+
+    # 2. field_role computed from actual assigned AccessRole
+    role_codes = set(
+        UserRoleAssignment.objects.filter(user=user, role__is_active=True)
+        .values_list('role__code', flat=True)
+    )
+
+    if is_superuser or 'admin' in role_codes:
+        field_role = "ADMIN"
+    elif role_codes & {'sales_manager', 'sales_executive'}:
+        field_role = "SALES"
+    elif role_codes & {'operations_manager', 'operations_executive', 'site_manager', 'field_supervisor'}:
+        field_role = "MANAGER"
+    elif getattr(user, 'user_type', '') == 'field':
+        field_role = "EMPLOYEE"
+    elif field_access:
+        field_role = "MANAGER"
+    else:
+        field_role = None
+
+    # 3. field_site_scope: wildcard ["*"] only for ADMIN or root scope node; else real subtree site IDs
+    if is_superuser or field_role == "ADMIN":
+        field_site_scope = ["*"]
+    else:
+        nodes = get_user_scope_nodes(user)
+        has_root_scope = any(node and (node.parent is None or node.path == 'logicon') for node in nodes)
+        if has_root_scope:
+            field_site_scope = ["*"]
+        elif not nodes:
+            field_site_scope = []
+        else:
+            q_objects = Q()
+            for node in nodes:
+                if getattr(node, 'path', ''):
+                    q_objects |= Q(scope_node__path=node.path) | Q(scope_node__path__startswith=node.path + '/')
+            if q_objects:
+                site_ids = list(
+                    SiteProfile.objects.filter(q_objects)
+                    .values_list('id', flat=True)
+                    .distinct()
+                )
+                field_site_scope = [str(sid) for sid in site_ids]
+            else:
+                field_site_scope = []
+
+    return {
+        'field_access': field_access,
+        'field_role': field_role,
+        'field_site_scope': field_site_scope,
+        'deployment_site_id': None,
+    }
+
+
+
+
+
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = 'email'
 
@@ -172,6 +260,11 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['user_type'] = getattr(user, 'user_type', '')
         token['is_staff'] = getattr(user, 'is_staff', False)
         
+        # FieldSense extended identity claims
+        field_claims = resolve_user_field_claims(user)
+        for key, val in field_claims.items():
+            token[key] = val
+
         return token
 
     def validate(self, attrs):
@@ -211,6 +304,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Log User Login Activity
         try:
             from django.utils import timezone
+
             from apps.audit.models import UserActivityLog
 
             request = self.context.get('request')
@@ -261,4 +355,68 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
             pass
 
         return data
+
+
+class FieldEmployeeTokenSerializer(serializers.Serializer):
+    org_id = serializers.IntegerField(required=True)
+    employee_code = serializers.CharField(required=True, max_length=50)
+    pin = serializers.CharField(required=True, max_length=32, write_only=True)
+
+    def validate(self, attrs):
+        org_id = attrs.get('org_id')
+        employee_code = attrs.get('employee_code', '').strip()
+        pin = attrs.get('pin', '').strip()
+
+        if not pin.isdigit() or len(pin) < 6:
+            raise serializers.ValidationError({'pin': 'PIN must be at least 6 numeric digits.'})
+
+        from apps.deployment.models import Employee, SiteDeployment
+        from django.contrib.auth.hashers import check_password
+
+        employee = Employee.objects.filter(org_id=org_id, employee_code__iexact=employee_code).first()
+
+        if not employee:
+            raise serializers.ValidationError({'non_field_errors': ['Invalid organization, employee code, or PIN.']})
+
+        if employee.field_is_locked:
+            raise serializers.ValidationError({
+                'non_field_errors': ['Account is locked due to multiple failed PIN attempts. Please contact HR to reset your PIN.']
+            })
+
+        if employee.status != 'active':
+            raise serializers.ValidationError({'non_field_errors': ['Employee account is not active.']})
+
+        if not employee.field_pin_hash:
+            raise serializers.ValidationError({'non_field_errors': ['PIN has not been set for this employee. Please contact HR.']})
+
+        if not check_password(pin, employee.field_pin_hash):
+            employee.field_login_failed_attempts += 1
+            if employee.field_login_failed_attempts >= 10:
+                employee.field_is_locked = True
+                employee.save(update_fields=['field_login_failed_attempts', 'field_is_locked'])
+                raise serializers.ValidationError({
+                    'non_field_errors': ['Account has been locked due to 10 consecutive failed PIN attempts. Please contact HR to reset your PIN.']
+                })
+            else:
+                employee.save(update_fields=['field_login_failed_attempts'])
+                remaining = 10 - employee.field_login_failed_attempts
+                raise serializers.ValidationError({
+                    'non_field_errors': [f'Invalid organization, employee code, or PIN. {remaining} attempts remaining before account lockout.']
+                })
+
+        # Success - reset failure count
+        if employee.field_login_failed_attempts > 0:
+            employee.field_login_failed_attempts = 0
+            employee.save(update_fields=['field_login_failed_attempts'])
+
+        # Validate active deployment
+        deployment = SiteDeployment.objects.filter(employee=employee, status='active').first()
+        if not deployment:
+            raise serializers.ValidationError({
+                'non_field_errors': ['No active deployment found for this employee. Access to FieldSense requires an active deployment.']
+            })
+
+        attrs['employee'] = employee
+        attrs['deployment'] = deployment
+        return attrs
 

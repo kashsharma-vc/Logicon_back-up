@@ -217,18 +217,10 @@ function CandidatePoolTab({
     setShortlistingId(cid)
     setShortlistErrors((prev) => ({ ...prev, [cid]: '' }))
     setShortlistSuccess((prev) => ({ ...prev, [cid]: false }))
-    if (row.match_result == null) {
-      setShortlistErrors((prev) => ({
-        ...prev,
-        [cid]: 'Scorecard was not saved. Refresh candidate pool and try again.',
-      }))
-      setShortlistingId(null)
-      return
-    }
     try {
       await shortlistCandidateForDemand(demandId, {
         candidate: cid,
-        match_result: row.match_result,
+        match_result: row.match_result ?? undefined,
       })
       setShortlistSuccess((prev) => ({ ...prev, [cid]: true }))
       setJustShortlisted(true)

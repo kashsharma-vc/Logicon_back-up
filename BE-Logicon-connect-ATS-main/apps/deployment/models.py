@@ -78,6 +78,23 @@ class Employee(TimeStampedModel):
     joined_on = models.DateField(null=True, blank=True)
     exited_on = models.DateField(null=True, blank=True)
 
+    # FieldSense Integration & Mobile Authentication Fields
+    field_pin_hash = models.CharField(max_length=128, blank=True, default='')
+    field_provisioned_at = models.DateTimeField(null=True, blank=True)
+    field_provisioning_status = models.CharField(
+        max_length=16,
+        choices=[
+            ('pending', 'Pending'),
+            ('provisioned', 'Provisioned'),
+            ('failed', 'Failed'),
+            ('deprovisioned', 'Deprovisioned'),
+        ],
+        null=True,
+        blank=True,
+    )
+    field_login_failed_attempts = models.PositiveIntegerField(default=0)
+    field_is_locked = models.BooleanField(default=False)
+
     class Meta:
         verbose_name = 'Employee'
         verbose_name_plural = 'Employees'
@@ -110,6 +127,12 @@ class Employee(TimeStampedModel):
     def full_name(self):
         parts = [self.first_name, self.middle_name, self.last_name]
         return ' '.join(p for p in parts if p)
+
+    def set_field_pin(self, raw_pin):
+        from django.contrib.auth.hashers import make_password
+        self.field_pin_hash = make_password(raw_pin)
+        self.field_login_failed_attempts = 0
+        self.field_is_locked = False
 
     def save(self, *args, **kwargs):
         self.phone_normalized = _normalize_phone(self.phone)
@@ -302,3 +325,40 @@ class DeploymentHistory(TimeStampedModel):
 
     def __str__(self):
         return f"{self.action_type} emp#{self.employee_id} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class FieldProvisioningLog(TimeStampedModel):
+    """Log for tracking FieldSense provisioning/deprovisioning background attempts."""
+
+    ACTION_CHOICES = [
+        ('provision', 'Provision'),
+        ('deprovision', 'Deprovision'),
+        ('update', 'Update'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.PROTECT,
+        related_name='provisioning_logs',
+    )
+    idempotency_key = models.CharField(max_length=64, unique=True, db_index=True)
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES)
+    payload_json = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending')
+    attempts = models.PositiveIntegerField(default=0)
+    last_attempted_at = models.DateTimeField(null=True, blank=True)
+    succeeded_at = models.DateTimeField(null=True, blank=True)
+    error_detail = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'Field Provisioning Log'
+        verbose_name_plural = 'Field Provisioning Logs'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.action} [{self.status}] for {self.employee} ({self.idempotency_key[:8]})"

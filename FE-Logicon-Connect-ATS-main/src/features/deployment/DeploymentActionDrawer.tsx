@@ -213,11 +213,23 @@ export function DeploymentActionDrawer({
         }
         case 'deployment-activate': {
           if (!deployment) throw new Error('Missing deployment.')
-          const row = await activateDeployment(deployment.id, { note: note.trim() })
-          onSuccess({ kind: 'deployment', row })
-          onClose()
+          try {
+            const row = await activateDeployment(deployment.id, { note: note.trim() })
+            onSuccess({ kind: 'deployment', row })
+            onClose()
+          } catch (err: any) {
+            const msg = err?.response?.data?.detail || err?.response?.data?.non_field_errors?.[0] || err?.message || ''
+            if (msg.includes('Cannot activate deployment in status') || msg.includes('already active')) {
+              // Already active on backend -> refresh list cleanly
+              onSuccess({ kind: 'deployment', row: { ...deployment, status: 'active' } as any })
+              onClose()
+            } else {
+              throw err
+            }
+          }
           break
         }
+
         case 'deployment-cancel': {
           if (!deployment) throw new Error('Missing deployment.')
           const row = await cancelDeployment(deployment.id, { note: note.trim() })
