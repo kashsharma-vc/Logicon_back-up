@@ -144,15 +144,32 @@ export interface ExcelImportCandidatesInput {
 }
 
 /** POST /api/talent/resumes/excel-import/ - role-tagged candidate import from CSV/XLSX */
-export async function excelImportCandidates(input: ExcelImportCandidatesInput): Promise<ExcelImportResponse> {
+export async function excelImportCandidates(input: ExcelImportCandidatesInput): Promise<ResumeImportBatch & ExcelImportResponse> {
   const fd = new FormData()
   fd.append('target_job_role', String(input.target_job_role))
   fd.append('source_type', input.source_type ?? 'excel_import')
   if (input.billing_type) fd.append('billing_type', input.billing_type)
   fd.append('file', input.file)
-  const res = await api.post<ExcelImportResponse>('/api/talent/resumes/excel-import/', fd)
+  const res = await api.post<ResumeImportBatch & ExcelImportResponse>('/api/talent/resumes/excel-import/', fd)
   return res.data
 }
+
+/** GET /api/talent/resumes/import-batches/{id}/download-errors/ */
+export async function downloadResumeImportErrors(batchId: number, filename?: string): Promise<void> {
+  const res = await api.get(`/api/talent/resumes/import-batches/${batchId}/download-errors/`, {
+    responseType: 'blob',
+  })
+  const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || `import_batch_${batchId}_errors.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  window.URL.revokeObjectURL(url)
+}
+
 
 export interface ListCandidateExperiencesParams {
   candidate: number

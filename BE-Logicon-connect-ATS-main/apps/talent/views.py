@@ -412,6 +412,34 @@ class ResumeViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQuerysetMi
             raise ValidationError({'detail': 'Import batch not found.'})
         return Response(ResumeImportBatchSerializer(batch, context={'request': request}).data)
 
+    @action(detail=False, methods=['get'], url_path=r'import-batches/(?P<batch_id>[^/.]+)/download-errors')
+    def import_batch_download_errors(self, request, batch_id=None):
+        """Download a CSV report of all failed rows in an import batch."""
+        import csv
+        from django.http import HttpResponse
+
+        try:
+            batch = self._get_import_batch_queryset().get(pk=batch_id)
+        except ResumeImportBatch.DoesNotExist:
+            raise ValidationError({'detail': 'Import batch not found.'})
+
+        failed_items = batch.items.filter(status='failed').order_by('row_number', 'id')
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="import_batch_{batch.pk}_errors.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow(['Row Number', 'Status', 'Error Reason', 'Filename/Reference', 'Timestamp'])
+        for item in failed_items:
+            writer.writerow([
+                item.row_number or '—',
+                item.status,
+                item.error_message or 'Unknown error',
+                item.original_filename or '',
+                item.created_at.strftime('%Y-%m-%d %H:%M:%S') if item.created_at else '',
+            ])
+        return response
+
+
     @action(detail=False, methods=['post'], url_path='excel-import')
     def excel_import(self, request):
         """Import candidate rows from CSV/XLSX and tag them to a target role."""

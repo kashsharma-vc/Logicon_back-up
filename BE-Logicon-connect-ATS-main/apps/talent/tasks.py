@@ -39,3 +39,12 @@ def process_resume_import_item_task(self, item_id: int) -> None:
     from apps.talent.services import process_resume_import_item
 
     process_resume_import_item(item_id)
+
+
+@shared_task(bind=True, max_retries=0, name='talent.process_excel_import_batch')
+def process_excel_import_batch_task(self, batch_id: int, chunk_size: int = 500) -> None:
+    """Process an Excel/CSV candidate import batch in chunks asynchronously."""
+    from apps.talent.services import process_excel_import_batch
+
+    process_excel_import_batch(batch_id, chunk_size=chunk_size)
+

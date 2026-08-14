@@ -627,41 +627,152 @@ def bulk_import_resume_files(user, files, target_job_role, source_type='bulk_upl
     }
 
 
-def import_candidates_from_excel(user, uploaded_file, default_target_job_role=None, source_type='excel_import', billing_type=None) -> dict:
-    """Import candidate rows from CSV/XLSX, store the sheet, and tag rows to roles."""
-    from apps.talent.models import Candidate, CandidateSkill, ResumeImportBatch, ResumeImportItem
+def _estimate_row_count(uploaded_file) -> int:
+    filename = (getattr(uploaded_file, 'name', '') or '').lower()
+    try:
+        if filename.endswith('.csv'):
+            uploaded_file.seek(0)
+            content = uploaded_file.read()
+            uploaded_file.seek(0)
+            if isinstance(content, bytes):
+                text = content.decode('utf-8-sig', errors='replace')
+            else:
+                text = content
+            lines = [l for l in text.splitlines() if l.strip()]
+            return max(0, len(lines) - 1)
+        elif filename.endswith('.xlsx'):
+            from openpyxl import load_workbook
+            uploaded_file.seek(0)
+            wb = load_workbook(uploaded_file, read_only=True, data_only=True)
+            total = 0
+            for sheet in wb.worksheets:
+                if sheet.max_row is not None and sheet.max_row > 1:
+                    total += sheet.max_row - 1
+            uploaded_file.seek(0)
+            if total > 0:
+                return total
+    except Exception:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+    return 0
 
-    filename = getattr(uploaded_file, 'name', '') or 'candidate-import'
-    content_type = getattr(uploaded_file, 'content_type', '') or ''
-    size_bytes = getattr(uploaded_file, 'size', 0)
-    document_type = determine_document_type(filename, content_type)
-    rows = _read_candidate_sheet(uploaded_file)
-    imported = 0
-    failed = 0
-    items = []
 
+def _stream_candidate_sheet(uploaded_file):
+    """Memory-efficient streaming generator for CSV and XLSX files."""
+    filename = (getattr(uploaded_file, 'name', '') or '').lower()
     uploaded_file.seek(0)
-    with transaction.atomic():
-        batch = ResumeImportBatch.objects.create(
-            org=user.org,
-            target_job_role=default_target_job_role,
-            source_type=source_type,
-            status='processing',
-            total_count=len(rows),
-            import_file=uploaded_file,
-            original_filename=filename,
-            content_type=content_type,
-            size_bytes=size_bytes,
-            document_type=document_type,
-            created_by=user,
-            billing_type=billing_type,
-        )
 
-        import_items_to_create = []
-        for index, row in enumerate(rows, start=2):
-            source_row_number = row.get('_source_row_number') or index
+    if filename.endswith('.csv'):
+        content = uploaded_file.read()
+        if isinstance(content, bytes):
+            text = content.decode('utf-8-sig', errors='replace')
+        else:
+            text = content
+        reader = csv.DictReader(StringIO(text))
+        for index, row in enumerate(reader, start=2):
+            normalized = {(_norm_header(k)): (v or '').strip() for k, v in row.items()}
+            normalized['_source_row_number'] = index
+            yield normalized
+        return
+
+    if filename.endswith('.xlsx'):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            raise ValidationError({
+                'file': 'openpyxl is not installed; install requirements to import .xlsx files.'
+            })
+
+        uploaded_file.seek(0)
+        workbook = load_workbook(uploaded_file, read_only=True, data_only=True)
+        for sheet in workbook.worksheets:
+            row_iterator = sheet.iter_rows(values_only=True)
+            first_rows = []
+            for _ in range(25):
+                try:
+                    r = next(row_iterator)
+                    first_rows.append(r)
+                except StopIteration:
+                    break
+
+            if not first_rows:
+                continue
+
+            header_index = _find_candidate_import_header_row(first_rows)
+            if header_index is None:
+                all_rows = first_rows
+                for source_row_number, values in enumerate(all_rows, start=1):
+                    if not values or not any(values):
+                        continue
+                    r_str = [str(v).strip() if v is not None else '' for v in values]
+                    row = {
+                        'name': r_str[0] if len(r_str) > 0 else '',
+                        'phone': r_str[1] if len(r_str) > 1 else '',
+                        'role': r_str[2] if len(r_str) > 2 else '',
+                        '_source_row_number': source_row_number,
+                    }
+                    if row['name'] or row['phone']:
+                        yield row
+                source_row_number = len(all_rows)
+                for values in row_iterator:
+                    source_row_number += 1
+                    if not values or not any(values):
+                        continue
+                    r_str = [str(v).strip() if v is not None else '' for v in values]
+                    row = {
+                        'name': r_str[0] if len(r_str) > 0 else '',
+                        'phone': r_str[1] if len(r_str) > 1 else '',
+                        'role': r_str[2] if len(r_str) > 2 else '',
+                        '_source_row_number': source_row_number,
+                    }
+                    if row['name'] or row['phone']:
+                        yield row
+                continue
+
+            headers = [_norm_header(h) for h in first_rows[header_index]]
+            for sub_idx, values in enumerate(first_rows[header_index + 1:], start=header_index + 2):
+                row = {}
+                for idx, header in enumerate(headers):
+                    if not header:
+                        continue
+                    value = values[idx] if idx < len(values) else ''
+                    row[header] = '' if value is None else str(value).strip()
+                if any(row.values()):
+                    row['_source_row_number'] = sub_idx
+                    yield row
+
+            current_row_number = len(first_rows)
+            for values in row_iterator:
+                current_row_number += 1
+                row = {}
+                for idx, header in enumerate(headers):
+                    if not header:
+                        continue
+                    value = values[idx] if idx < len(values) else ''
+                    row[header] = '' if value is None else str(value).strip()
+                if any(row.values()):
+                    row['_source_row_number'] = current_row_number
+                    yield row
+        return
+
+    raise ValidationError({'file': 'Upload a .csv or .xlsx file.'})
+
+
+def _process_candidate_chunk(batch, chunk, org, default_target_job_role, billing_type, content_type, document_type):
+    from apps.talent.models import Candidate, CandidateSkill, ResumeImportItem
+
+    imported = 0
+    duplicates = 0
+    failed = 0
+    import_items_to_create = []
+
+    with transaction.atomic():
+        for row in chunk:
+            source_row_number = row.get('_source_row_number')
             try:
-                role = _resolve_import_job_role(user.org, row, default_target_job_role)
+                role = _resolve_import_job_role(org, row, default_target_job_role)
                 phone = _value(row, 'phone', 'mobile', 'contact')
                 if not phone:
                     raise ValidationError({'phone': 'Phone/mobile is required.'})
@@ -669,7 +780,7 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                 first_name, last_name = _row_names(row)
                 source_reference = f'excel_import_batch:{batch.pk}:row:{source_row_number}'
                 candidate, created = Candidate.objects.get_or_create(
-                    org=user.org,
+                    org=org,
                     phone_normalized=phone_normalized,
                     defaults={
                         'phone': phone,
@@ -689,6 +800,7 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                     },
                 )
                 if not created:
+                    duplicates += 1
                     update_fields = []
                     if billing_type and candidate.billing_type != billing_type:
                         candidate.billing_type = billing_type
@@ -698,6 +810,8 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                         update_fields.append('target_job_role')
                     if update_fields:
                         candidate.save(update_fields=update_fields)
+                else:
+                    imported += 1
 
                 for skill_name in _split_skills(_value(row, 'skills', 'skill')):
                     normalized = normalize_skill_name(skill_name)
@@ -710,8 +824,6 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                         },
                     )
 
-                imported += 1
-                row_status = 'created' if created else 'updated'
                 import_items_to_create.append(
                     ResumeImportItem(
                         batch=batch,
@@ -724,12 +836,6 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                         candidate=candidate,
                     )
                 )
-                items.append({
-                    'row': source_row_number,
-                    'status': row_status,
-                    'candidate': candidate.pk,
-                    'target_job_role': role.pk if role else None,
-                })
             except Exception as exc:
                 failed += 1
                 error = _flatten_error(exc)
@@ -745,29 +851,183 @@ def import_candidates_from_excel(user, uploaded_file, default_target_job_role=No
                         error_message=error[:2000],
                     )
                 )
-                items.append({
-                    'row': source_row_number,
-                    'status': 'failed',
-                    'error': error,
-                })
 
         if import_items_to_create:
-            ResumeImportItem.objects.bulk_create(import_items_to_create, batch_size=5000)
+            ResumeImportItem.objects.bulk_create(import_items_to_create, batch_size=2000)
 
-        batch.status = 'completed_with_errors' if failed else 'completed'
-        batch.processed_count = imported + failed
+    return imported, duplicates, failed
+
+
+def process_excel_import_batch(batch_id: int, chunk_size: int = 500) -> dict:
+    """Celery task worker: processes Excel/CSV rows in memory-efficient chunks."""
+    from apps.talent.models import ResumeImportBatch
+
+    try:
+        batch = ResumeImportBatch.objects.select_related('org', 'target_job_role', 'created_by').get(pk=batch_id)
+    except ResumeImportBatch.DoesNotExist:
+        return {'status': 'not_found'}
+
+    if not batch.import_file:
+        batch.status = 'failed'
+        batch.save(update_fields=['status'])
+        return {'status': 'no_file'}
+
+    batch.status = 'processing'
+    batch.save(update_fields=['status', 'updated_at'])
+
+    imported = batch.success_count or 0
+    duplicates = batch.duplicate_count or 0
+    failed = batch.failed_count or 0
+    processed = batch.processed_count or 0
+
+    content_type = batch.content_type or ''
+    document_type = batch.document_type or 'unknown'
+    billing_type = batch.billing_type
+    default_target_job_role = batch.target_job_role
+    org = batch.org
+
+    chunk = []
+
+    try:
+        batch.import_file.open('rb')
+        stream = _stream_candidate_sheet(batch.import_file)
+
+        for row in stream:
+            chunk.append(row)
+            if len(chunk) >= chunk_size:
+                c_imported, c_dups, c_failed = _process_candidate_chunk(
+                    batch=batch,
+                    chunk=chunk,
+                    org=org,
+                    default_target_job_role=default_target_job_role,
+                    billing_type=billing_type,
+                    content_type=content_type,
+                    document_type=document_type,
+                )
+                imported += c_imported
+                duplicates += c_dups
+                failed += c_failed
+                processed += len(chunk)
+
+                batch.processed_count = processed
+                batch.success_count = imported
+                batch.duplicate_count = duplicates
+                batch.failed_count = failed
+                if batch.total_count < processed:
+                    batch.total_count = processed
+                batch.save(update_fields=[
+                    'processed_count', 'success_count', 'duplicate_count', 'failed_count', 'total_count', 'updated_at'
+                ])
+                chunk = []
+
+        if chunk:
+            c_imported, c_dups, c_failed = _process_candidate_chunk(
+                batch=batch,
+                chunk=chunk,
+                org=org,
+                default_target_job_role=default_target_job_role,
+                billing_type=billing_type,
+                content_type=content_type,
+                document_type=document_type,
+            )
+            imported += c_imported
+            duplicates += c_dups
+            failed += c_failed
+            processed += len(chunk)
+
+        try:
+            batch.import_file.close()
+        except Exception:
+            pass
+
+        batch.total_count = processed
+        batch.processed_count = processed
         batch.success_count = imported
+        batch.duplicate_count = duplicates
         batch.failed_count = failed
+        batch.status = 'completed_with_errors' if failed > 0 else 'completed'
         batch.save(update_fields=[
-            'status', 'processed_count', 'success_count', 'failed_count', 'updated_at',
+            'status', 'total_count', 'processed_count', 'success_count', 'duplicate_count', 'failed_count', 'updated_at'
         ])
+    except Exception as exc:
+        try:
+            batch.import_file.close()
+        except Exception:
+            pass
+        batch.status = 'failed'
+        batch.save(update_fields=['status', 'updated_at'])
+        return {'status': 'failed', 'error': str(exc)}
 
     return {
         'batch': batch.pk,
         'batch_id': batch.pk,
-        'document_type': document_type,
+        'status': batch.status,
         'imported': imported,
+        'duplicates': duplicates,
         'failed': failed,
+        'total': processed,
+    }
+
+
+def import_candidates_from_excel(user, uploaded_file, default_target_job_role=None, source_type='excel_import', billing_type=None) -> dict:
+    """Create an Excel/CSV import batch and enqueue Celery task for async chunk processing."""
+    from apps.talent.models import ResumeImportBatch
+
+    filename = getattr(uploaded_file, 'name', '') or 'candidate-import'
+    content_type = getattr(uploaded_file, 'content_type', '') or ''
+    size_bytes = getattr(uploaded_file, 'size', 0)
+    document_type = determine_document_type(filename, content_type)
+
+    uploaded_file.seek(0)
+    total_count = _estimate_row_count(uploaded_file)
+    uploaded_file.seek(0)
+
+    with transaction.atomic():
+        batch = ResumeImportBatch.objects.create(
+            org=user.org,
+            target_job_role=default_target_job_role,
+            source_type=source_type,
+            status='queued',
+            total_count=total_count,
+            import_file=uploaded_file,
+            original_filename=filename,
+            content_type=content_type,
+            size_bytes=size_bytes,
+            document_type=document_type,
+            created_by=user,
+            billing_type=billing_type,
+        )
+
+        def _enqueue():
+            from apps.talent.tasks import process_excel_import_batch_task
+            process_excel_import_batch_task.delay(batch.pk, chunk_size=500)
+
+        transaction.on_commit(_enqueue)
+
+    batch.refresh_from_db()
+    items = []
+    if batch.status in ('completed', 'completed_with_errors'):
+        for item in batch.items.select_related('candidate').all():
+            items.append({
+                'row': item.row_number,
+                'status': 'created' if item.status == 'indexed' else item.status,
+                'candidate': item.candidate_id,
+                'error': item.error_message,
+                'target_job_role': default_target_job_role.pk if default_target_job_role else None,
+            })
+
+    return {
+        'batch': batch.pk,
+        'batch_id': batch.pk,
+        'id': batch.pk,
+        'status': batch.status,
+        'document_type': document_type,
+        'imported': batch.success_count,
+        'duplicates': batch.duplicate_count,
+        'failed': batch.failed_count,
+        'total_count': batch.total_count,
+        'processed_count': batch.processed_count,
+        'message': 'Import started',
         'items': items,
     }
 

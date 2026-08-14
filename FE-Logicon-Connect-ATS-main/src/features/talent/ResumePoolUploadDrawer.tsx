@@ -3,6 +3,7 @@ import { CheckCircle2, Download, FileSpreadsheet, FileText, Loader2, Upload, X, 
 import {
   bulkUploadResumes,
   downloadResumeExcelTemplate,
+  downloadResumeImportErrors,
   excelImportCandidates,
   getResumeImportBatch,
 } from '@/api/talent'
@@ -256,13 +257,17 @@ export function ResumePoolUploadDrawer({
           onSuccess?.()
         }
       } else if (excelFile) {
-        const res = await excelImportCandidates({ 
+        const batch = await excelImportCandidates({ 
           target_job_role: role, 
           file: excelFile,
           billing_type: billingType || undefined
         })
-        setExcelResult(summarizeExcel(res))
-        onSuccess?.()
+        setActiveBatch(batch)
+        setPolling(!TERMINAL_BATCH_STATUSES.has(batch.status))
+        if (TERMINAL_BATCH_STATUSES.has(batch.status)) {
+          terminalNotifiedRef.current = true
+          onSuccess?.()
+        }
       }
     } catch (e: unknown) {
       setError(parseApiError(e, 'Upload could not be completed').message)
@@ -735,9 +740,21 @@ function BatchResultPanel({
   onUploadMore: () => void
   onRefreshPool: () => void
 }) {
+  const [downloadingErrors, setDownloadingErrors] = useState(false)
   const terminal = TERMINAL_BATCH_STATUSES.has(batch.status)
   const statusText = batchStatusLabel(batch.status)
   const progress = batch.total_count > 0 ? (batch.processed_count / batch.total_count) * 100 : 0
+
+  async function handleDownloadErrors() {
+    setDownloadingErrors(true)
+    try {
+      await downloadResumeImportErrors(batch.id, `import_batch_${batch.id}_failed_rows.csv`)
+    } catch {
+      // ignore or alert
+    } finally {
+      setDownloadingErrors(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -780,7 +797,7 @@ function BatchResultPanel({
               />
             </div>
             <p className="mt-2 text-xs text-app-subtle">
-              Processing files... This may take a moment.
+              Processing in chunks... This updates automatically.
             </p>
           </div>
         ) : null}
@@ -814,10 +831,24 @@ function BatchResultPanel({
         </div>
       </div>
 
+      {/* Download failed rows button if any failures */}
+      {batch.failed_count > 0 ? (
+        <Button
+          type="button"
+          variant="secondary"
+          className="min-h-9 w-full gap-2 text-xs text-status-danger border-status-danger/30 hover:bg-status-danger/5"
+          disabled={downloadingErrors}
+          onClick={() => void handleDownloadErrors()}
+        >
+          <Download className="h-4 w-4" aria-hidden />
+          {downloadingErrors ? 'Downloading failed rows…' : `Download ${batch.failed_count} Failed Row${batch.failed_count === 1 ? '' : 's'} (.csv)`}
+        </Button>
+      ) : null}
+
       {/* File list */}
       {batch.items.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-app-subtle">Files</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-app-subtle">Files / Rows</p>
           <ul className="space-y-2">
             {batch.items.map((item) => {
               const label = item.candidate_name?.trim() || item.original_filename?.trim() || `Item #${item.id}`
@@ -876,6 +907,7 @@ function BatchResultPanel({
     </div>
   )
 }
+
 
 function ExcelResultPanel({
   result,
