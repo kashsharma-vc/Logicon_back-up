@@ -56,25 +56,27 @@ def process_excel_import_batch_task(self, batch_id: int, chunk_size: int = 500) 
 )
 def generate_bulk_candidate_resumes_task(self, candidate_ids):
     """
-    Generate resume PDFs for candidates in a small batch.
+    Generate professional resume PDFs for candidates in a small batch.
 
     Safe to run again:
     skips Candidate + target_job_role combinations
     that already have a Resume.
     """
-    import io
     import re
+    import hashlib
 
     from django.core.files.base import ContentFile
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import letter
-
     from apps.talent.models import Candidate, Resume
+    from apps.talent.resume_generator import (
+        generate_candidate_resume_pdf_bytes,
+        build_candidate_text_summary,
+    )
 
     candidates = (
         Candidate.objects
         .filter(id__in=candidate_ids)
-        .select_related('target_job_role')
+        .select_related('target_job_role', 'org')
+        .prefetch_related('skills', 'experiences', 'educations')
     )
 
     existing_resume_keys = set(
@@ -99,57 +101,22 @@ def generate_bulk_candidate_resumes_task(self, candidate_ids):
             continue
 
         name = candidate.full_name.strip() or f"Candidate_{candidate.id}"
-        mobile = candidate.phone_normalized or candidate.phone
         designation = (
             job_role.name
             if job_role
             else candidate.current_role or "General Candidate"
         )
 
-        # -------- Generate candidate-specific PDF --------
+        # -------- Generate professional candidate PDF & text summary --------
+        try:
+            pdf_bytes = generate_candidate_resume_pdf_bytes(candidate)
+        except Exception:
+            continue
 
-        buffer = io.BytesIO()
-
-        pdf = canvas.Canvas(
-            buffer,
-            pagesize=letter
-        )
-
-        pdf.setFont("Helvetica-Bold", 20)
-        pdf.drawString(
-            100,
-            750,
-            "Candidate Resume"
-        )
-
-        pdf.setFont("Helvetica", 12)
-
-        pdf.drawString(
-            100,
-            710,
-            f"Name: {name}"
-        )
-
-        pdf.drawString(
-            100,
-            690,
-            f"Mobile: {mobile}"
-        )
-
-        pdf.drawString(
-            100,
-            670,
-            f"Designation: {designation}"
-        )
-
-        pdf.showPage()
-        pdf.save()
-
-        pdf_bytes = buffer.getvalue()
-        buffer.close()
+        text_summary = build_candidate_text_summary(candidate)
+        file_hash = hashlib.sha256(pdf_bytes).hexdigest()
 
         # -------- Safe filename --------
-
         safe_name = re.sub(
             r'[^A-Za-z0-9_-]+',
             '_',
@@ -166,16 +133,22 @@ def generate_bulk_candidate_resumes_task(self, candidate_ids):
         safe_role = safe_role or "role"
 
         # -------- Create Resume --------
-
         resume = Resume(
             candidate=candidate,
             original_filename=f"{safe_name}_{safe_role}.pdf",
             content_type="application/pdf",
             size_bytes=len(pdf_bytes),
-            status='uploaded',
+            status='indexed',
             source_type='excel_import',
             document_type='pdf',
             target_job_role=job_role,
+            file_hash=file_hash,
+            raw_text=text_summary,
+            cleaned_text=text_summary,
+            parser_confidence=1.0,
+            extraction_confidence=1.0,
+            extraction_engine='auto_generated_pdf',
+            parser_engine='talent_profile_v1',
         )
 
         resume.file.save(
@@ -184,9 +157,6 @@ def generate_bulk_candidate_resumes_task(self, candidate_ids):
             save=False,
         )
 
-        # IMPORTANT:
-        # save each resume immediately.
-        # Do not wait for all 500/15000 before DB insert.
         resume.save()
 
         existing_resume_keys.add(dedup_key)

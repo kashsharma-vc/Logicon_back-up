@@ -39,8 +39,12 @@ export function SearchableSelect({
 
   const filteredOptions = useMemo(() => {
     if (!searchTerm.trim()) return options
-    const term = searchTerm.toLowerCase()
-    return options.filter((o) => o.label.toLowerCase().includes(term))
+    const terms = searchTerm.toLowerCase().split(/\s+/).filter(Boolean)
+    return options.filter((o) => {
+      if (!o.value) return false // Hide "Any role" placeholder when actively searching
+      const labelLower = o.label.toLowerCase()
+      return terms.every((t) => labelLower.includes(t))
+    })
   }, [options, searchTerm])
 
   useEffect(() => {
@@ -60,6 +64,8 @@ export function SearchableSelect({
       setSearchTerm('')
     }
   }, [open])
+
+  const totalCount = options.filter((o) => o.value).length
 
   return (
     <div className={cn('relative w-full', className)} ref={containerRef}>
@@ -103,9 +109,9 @@ export function SearchableSelect({
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 max-h-72 w-full overflow-hidden rounded-xl border border-app-border bg-app-surface shadow-xl ring-1 ring-black/5 animate-in fade-in-50 zoom-in-95">
-          {/* Search box */}
-          <div className="sticky top-0 z-10 border-b border-app-border bg-app-surface p-2">
+        <div className="absolute z-50 mt-1 max-h-[420px] w-full min-w-[280px] overflow-hidden rounded-xl border border-app-border bg-app-surface shadow-2xl ring-1 ring-black/5 animate-in fade-in-50 zoom-in-95">
+          {/* Search box & counter header */}
+          <div className="sticky top-0 z-10 border-b border-app-border bg-app-surface p-2.5 space-y-1.5">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle" />
               <input
@@ -117,32 +123,50 @@ export function SearchableSelect({
                 className="w-full rounded-lg border border-app-border bg-app-muted/30 py-1.5 pl-8 pr-3 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
             </div>
+            <div className="flex items-center justify-between px-1 text-[11px] text-app-subtle">
+              <span>{searchTerm.trim() ? `Found ${filteredOptions.length} matching` : `All ${totalCount} available roles`}</span>
+              {value && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange('')
+                    setOpen(false)
+                  }}
+                  className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+                >
+                  Reset filter
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Options list */}
-          <div className="max-h-56 overflow-y-auto p-1 text-xs">
+          <div className="max-h-72 overflow-y-auto p-1.5 text-xs divide-y divide-app-border/30">
             {filteredOptions.length === 0 ? (
-              <div className="py-4 text-center text-app-subtle">No roles found</div>
+              <div className="py-6 text-center text-app-subtle">
+                <p className="font-medium">No matching roles found</p>
+                <p className="text-[11px] mt-0.5">Try searching with a different keyword</p>
+              </div>
             ) : (
-              filteredOptions.map((opt) => {
+              filteredOptions.map((opt, idx) => {
                 const isSelected = opt.value === value
                 return (
                   <button
-                    key={opt.value}
+                    key={`${opt.value}-${idx}`}
                     type="button"
                     onClick={() => {
                       onChange(opt.value)
                       setOpen(false)
                     }}
                     className={cn(
-                      'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition-colors',
+                      'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-colors',
                       isSelected
-                        ? 'bg-brand-500/10 font-semibold text-brand-600 dark:text-brand-400'
-                        : 'text-app-text hover:bg-app-muted/60',
+                        ? 'bg-brand-500/15 font-semibold text-brand-700 dark:text-brand-300'
+                        : 'text-app-text hover:bg-app-muted/70',
                     )}
                   >
-                    <span className="truncate">{opt.label}</span>
-                    {isSelected && <Check className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />}
+                    <span className="truncate pr-2">{opt.label}</span>
+                    {isSelected && <Check className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />}
                   </button>
                 )
               })

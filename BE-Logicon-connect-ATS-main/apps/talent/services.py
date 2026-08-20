@@ -761,7 +761,14 @@ def _stream_candidate_sheet(uploaded_file):
 
 
 def _process_candidate_chunk(batch, chunk, org, default_target_job_role, billing_type, content_type, document_type):
-    from apps.talent.models import Candidate, CandidateSkill, ResumeImportItem
+    from apps.talent.models import Candidate, CandidateSkill, Resume, ResumeImportItem
+    import re
+    import hashlib
+    from django.core.files.base import ContentFile
+    from apps.talent.resume_generator import (
+        generate_candidate_resume_pdf_bytes,
+        build_candidate_text_summary,
+    )
 
     imported = 0
     duplicates = 0
@@ -833,16 +840,66 @@ def _process_candidate_chunk(batch, chunk, org, default_target_job_role, billing
                         },
                     )
 
+                # Generate and attach professional resume if not already present
+                resume = Resume.objects.filter(candidate=candidate, target_job_role=role).first()
+                if not resume:
+                    try:
+                        pdf_bytes = generate_candidate_resume_pdf_bytes(candidate)
+                        text_summary = build_candidate_text_summary(candidate)
+                        file_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
+                        safe_name = re.sub(
+                            r'[^A-Za-z0-9_-]+',
+                            '_',
+                            candidate.full_name.strip() or f'Candidate_{candidate.id}'
+                        ).strip('_')[:100]
+                        safe_role = re.sub(
+                            r'[^A-Za-z0-9_-]+',
+                            '_',
+                            (role.name if role else candidate.current_role) or 'role'
+                        ).strip('_')[:80]
+                        safe_name = safe_name or f'candidate_{candidate.id}'
+                        safe_role = safe_role or 'role'
+
+                        resume = Resume(
+                            candidate=candidate,
+                            original_filename=f"{safe_name}_{safe_role}.pdf",
+                            content_type="application/pdf",
+                            size_bytes=len(pdf_bytes),
+                            status='indexed',
+                            source_type='excel_import',
+                            document_type='pdf',
+                            target_job_role=role,
+                            file_hash=file_hash,
+                            raw_text=text_summary,
+                            cleaned_text=text_summary,
+                            parser_confidence=1.0,
+                            extraction_confidence=1.0,
+                            extraction_engine='auto_generated_pdf',
+                            parser_engine='talent_profile_v1',
+                            uploaded_by=batch.created_by,
+                            import_batch_id=str(batch.pk),
+                        )
+                        resume.file.save(
+                            f"{safe_name}_{safe_role}_resume.pdf",
+                            ContentFile(pdf_bytes),
+                            save=False,
+                        )
+                        resume.save()
+                    except Exception:
+                        resume = None
+
                 import_items_to_create.append(
                     ResumeImportItem(
                         batch=batch,
                         original_filename=f'Row {source_row_number}',
                         content_type=content_type,
-                        size_bytes=0,
+                        size_bytes=resume.size_bytes if resume else 0,
                         document_type=document_type,
                         row_number=source_row_number,
                         status='indexed',
                         candidate=candidate,
+                        resume=resume,
                     )
                 )
             except Exception as exc:

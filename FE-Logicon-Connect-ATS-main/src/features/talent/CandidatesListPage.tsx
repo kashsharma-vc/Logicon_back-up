@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Download,
   FileText,
   History,
   MapPin,
@@ -15,7 +16,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { listCandidates, bulkGenerateResumes } from '@/api/talent'
+import { listCandidates, bulkGenerateResumes, exportCandidatesCsv } from '@/api/talent'
 import { fetchAllJobRoles, type JobRoleRow } from '@/api/jobs'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
@@ -282,6 +283,8 @@ export function CandidatesListPage() {
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<CandidateRow[]>([])
   const [count, setCount] = useState<number | undefined>(undefined)
+  const [withResumeCount, setWithResumeCount] = useState<number | undefined>(undefined)
+  const [withoutResumeCount, setWithoutResumeCount] = useState<number | undefined>(undefined)
   const [intakeOpen, setIntakeOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -320,6 +323,31 @@ export function CandidatesListPage() {
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
   const [roles, setRoles] = useState<JobRoleRow[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
+  const [exporting, setExporting] = useState(false)
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const roleId = Number(mappedRole)
+      await exportCandidatesCsv({
+        search: search.trim() || undefined,
+        skill: skill.trim() || undefined,
+        document_type: documentType || undefined,
+        min_experience: minExperience.trim() || undefined,
+        max_experience: maxExperience.trim() || undefined,
+        location: location.trim() || undefined,
+        lifecycle_status: lifecycle || undefined,
+        availability_status: availability || undefined,
+        journey_status: journeyStatus || undefined,
+        source_type: sourceType || undefined,
+        target_job_role: mappedRole && Number.isFinite(roleId) ? roleId : undefined,
+      })
+    } catch (err: any) {
+      alert(err?.message || 'Failed to download candidate list')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -353,7 +381,9 @@ export function CandidatesListPage() {
         roleMap.set(c.target_job_role, { id: c.target_job_role, name: c.target_job_role_name })
       }
     }
-    return Array.from(roleMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+    return Array.from(roleMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+    )
   }, [roles, rows])
 
   const roleOptions = useMemo(() => {
@@ -391,6 +421,8 @@ export function CandidatesListPage() {
         if (cancelled) return
         setRows(res.items)
         setCount(res.count)
+        setWithResumeCount(res.with_resume_count)
+        setWithoutResumeCount(res.without_resume_count)
       } catch (e: unknown) {
         if (!cancelled) setError(parseApiError(e, 'Could not load resume pool').message)
       } finally {
@@ -424,30 +456,41 @@ export function CandidatesListPage() {
           <h2 className="text-lg font-semibold text-app-text">Resume Pool</h2>
           <p className="text-sm text-app-secondary">Browse and manage candidate resumes in your talent database.</p>
         </div>
-        {canCreate && (
-          <div className="flex shrink-0 flex-wrap gap-2 sm:self-start">
-            <Button 
-              type="button" 
-              variant="secondary"
-              onClick={() => setBulkGenOpen(true)}
-            >
-              <UploadCloud className="mr-2 h-4 w-4" aria-hidden />
-              Auto-Generate via Excel
-            </Button>
-            <Button type="button" onClick={() => setUploadOpen(true)}>
-              <UploadCloud className="mr-2 h-4 w-4" aria-hidden />
-              Upload resumes
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setHistoryOpen(true)}>
-              <History className="mr-2 h-4 w-4" aria-hidden />
-              History
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setIntakeOpen(true)}>
-              <UserPlus className="mr-2 h-4 w-4" aria-hidden />
-              Add candidate
-            </Button>
-          </div>
-        )}
+        <div className="flex shrink-0 flex-wrap gap-2 sm:self-start">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={exporting}
+            onClick={handleExport}
+          >
+            <Download className="mr-2 h-4 w-4" aria-hidden />
+            {exporting ? 'Exporting…' : 'Download Candidate List'}
+          </Button>
+          {canCreate && (
+            <>
+              <Button 
+                type="button" 
+                variant="secondary"
+                onClick={() => setBulkGenOpen(true)}
+              >
+                <UploadCloud className="mr-2 h-4 w-4" aria-hidden />
+                Auto-Generate via Excel
+              </Button>
+              <Button type="button" onClick={() => setUploadOpen(true)}>
+                <UploadCloud className="mr-2 h-4 w-4" aria-hidden />
+                Upload resumes
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setHistoryOpen(true)}>
+                <History className="mr-2 h-4 w-4" aria-hidden />
+                History
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setIntakeOpen(true)}>
+                <UserPlus className="mr-2 h-4 w-4" aria-hidden />
+                Add candidate
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Stats row */}
@@ -466,7 +509,7 @@ export function CandidatesListPage() {
             <FileText className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-lg font-bold text-app-text">{withResume}</p>
+            <p className="text-lg font-bold text-app-text">{withResumeCount ?? withResume}</p>
             <p className="text-[11px] text-app-subtle">With Resume</p>
           </div>
         </div>
@@ -475,7 +518,7 @@ export function CandidatesListPage() {
             <FileText className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-lg font-bold text-app-text">{withoutResume}</p>
+            <p className="text-lg font-bold text-app-text">{withoutResumeCount ?? withoutResume}</p>
             <p className="text-[11px] text-app-subtle">No Resume</p>
           </div>
         </div>
@@ -516,7 +559,7 @@ export function CandidatesListPage() {
             onChange={(val) => setField('target_job_role', val)}
             options={roleOptions}
             placeholder="Any role"
-            searchPlaceholder="Search 300+ roles..."
+            searchPlaceholder="Search 650+ roles..."
           />
           <Select id="cand_doc" label="Document type" value={documentType} onChange={(e) => setField('document_type', e.target.value)}>
             {DOCUMENT_TYPE_FILTER_OPTIONS.map((o) => (

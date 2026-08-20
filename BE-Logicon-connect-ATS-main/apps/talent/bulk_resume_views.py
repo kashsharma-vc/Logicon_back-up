@@ -147,6 +147,9 @@ class BulkExcelResumeGenerateView(APIView):
                 _read_candidate_sheet,
                 _value,
                 _row_names,
+                _decimal_or_none,
+                _split_skills,
+                normalize_skill_name,
             )
 
             file_obj.seek(0)
@@ -269,19 +272,26 @@ class BulkExcelResumeGenerateView(APIView):
                     if alt_mobile
                     else None
                 )
+                email = _clean_val(_value(row, 'email', 'email_address', 'mail'))
+                location = _clean_val(_value(row, 'current_location', 'location', 'city', 'address'))
+                experience_raw = _value(row, 'total_experience_years', 'experience_years', 'experience', 'exp')
+                company = _clean_val(_value(row, 'current_company', 'company', 'organization', 'employer'))
+                skills_raw = _clean_val(_value(row, 'skills', 'skill', 'key_skills'))
 
                 parsed_rows.append(
                     {
                         'name': name,
-
-                        # Store normalized value here as well.
-                        # Avoid bringing the raw unsafe phone
-                        # farther into the import pipeline.
+                        'first_name': first_name,
+                        'last_name': last_name,
                         'mobile': phone_norm,
-
                         'alt_mobile': alt_phone_norm,
                         'phone_norm': phone_norm,
                         'designation': designation,
+                        'email': email,
+                        'location': location,
+                        'experience_raw': experience_raw,
+                        'company': company,
+                        'skills_raw': skills_raw,
                     }
                 )
 
@@ -541,6 +551,11 @@ class BulkExcelResumeGenerateView(APIView):
                     first_name=first_name,
                     last_name=last_name,
 
+                    email=row_data.get('email') or '',
+                    current_location=row_data.get('location') or '',
+                    total_experience_years=_decimal_or_none(row_data.get('experience_raw')),
+                    current_company=row_data.get('company') or '',
+
                     source='import_',
 
                     # Important:
@@ -586,6 +601,19 @@ class BulkExcelResumeGenerateView(APIView):
                             'alt_mobile'
                         ]
                     )
+
+                if row_data.get('email') and not candidate.email:
+                    candidate.email = row_data['email']
+
+                if row_data.get('location') and not candidate.current_location:
+                    candidate.current_location = row_data['location']
+
+                if row_data.get('company') and not candidate.current_company:
+                    candidate.current_company = row_data['company']
+
+                exp_dec = _decimal_or_none(row_data.get('experience_raw'))
+                if exp_dec is not None and candidate.total_experience_years is None:
+                    candidate.total_experience_years = exp_dec
 
                 if collar_type:
                     candidate.collar_type = (
@@ -645,6 +673,10 @@ class BulkExcelResumeGenerateView(APIView):
                 candidates_to_update,
                 [
                     'alternate_phone',
+                    'email',
+                    'current_location',
+                    'current_company',
+                    'total_experience_years',
                     'collar_type',
                     'billing_type',
                     'current_role',
@@ -652,6 +684,25 @@ class BulkExcelResumeGenerateView(APIView):
                 ],
                 batch_size=5000,
             )
+
+        # ------------------------------------------------------------
+        # 8b. Create candidate skills
+        # ------------------------------------------------------------
+        from apps.talent.models import CandidateSkill
+        for row_data in parsed_rows:
+            phone_norm = row_data['phone_norm']
+            cand = existing_candidates.get(phone_norm)
+            if cand and row_data.get('skills_raw'):
+                for skill_name in _split_skills(row_data['skills_raw']):
+                    norm_s = normalize_skill_name(skill_name)
+                    CandidateSkill.objects.get_or_create(
+                        candidate=cand,
+                        normalized_skill_name=norm_s,
+                        defaults={
+                            'skill_name': skill_name,
+                            'source': 'excel_import',
+                        },
+                    )
 
         # ------------------------------------------------------------
         # 9. Queue Resume generation using Celery

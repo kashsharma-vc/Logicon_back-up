@@ -78,6 +78,7 @@ class CandidateViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQueryse
     action_required_capabilities = {
         'list': CANDIDATE_READ,
         'retrieve': CANDIDATE_READ,
+        'export': CANDIDATE_READ,
         'create': CANDIDATE_CREATE,
         'partial_update': CANDIDATE_UPDATE,
         'merge': CANDIDATE_UPDATE,
@@ -192,6 +193,18 @@ class CandidateViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQueryse
         serializer = self.get_serializer(filtered, many=True)
         return Response(serializer.data)
 
+    def get_paginated_response(self, data):
+        response = super().get_paginated_response(data)
+        try:
+            filtered_qs = self.filter_queryset(self.get_queryset())
+            total_count = response.data.get('count', len(data))
+            with_res = filtered_qs.filter(resumes__isnull=False).distinct().count()
+            response.data['with_resume_count'] = with_res
+            response.data['without_resume_count'] = max(0, total_count - with_res)
+        except Exception:
+            pass
+        return response
+
     def perform_create(self, serializer):
         phone = serializer.validated_data['phone']
         phone_normalized = normalize_phone(phone)
@@ -219,6 +232,95 @@ class CandidateViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQueryse
             serializer.save(phone_normalized=phone_normalized)
         else:
             serializer.save()
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        """GET /api/talent/candidates/export/ — Export candidate list as a CSV spreadsheet."""
+        from django.http import StreamingHttpResponse
+        from datetime import datetime
+        import csv
+
+        queryset = self.filter_queryset(self.get_queryset()).select_related(
+            'org', 'target_job_role'
+        ).prefetch_related('skills', 'resumes')
+
+        class Echo:
+            def write(self, value):
+                return value
+
+        def stream_csv():
+            pseudo_buffer = Echo()
+            writer = csv.writer(pseudo_buffer)
+
+            headers = [
+                'Candidate ID',
+                'Full Name',
+                'First Name',
+                'Last Name',
+                'Phone',
+                'Alternate Phone',
+                'Email',
+                'Current Location',
+                'Preferred Location',
+                'Target Role',
+                'Current Role / Designation',
+                'Current Company',
+                'Total Experience (Years)',
+                'Collar Type',
+                'Billing Type',
+                'Lifecycle Status',
+                'Availability Status',
+                'Notice Period (Days)',
+                'Current CTC (INR)',
+                'Expected CTC (INR)',
+                'Skills',
+                'Resume Attached',
+                'Resume Count',
+                'Source',
+                'Created At',
+            ]
+            yield writer.writerow(headers)
+
+            for candidate in queryset.iterator(chunk_size=500):
+                skills_list = [s.skill_name for s in candidate.skills.all() if s.skill_name]
+                skills_str = "; ".join(skills_list)
+                resume_count = candidate.resumes.count()
+
+                row = [
+                    candidate.id,
+                    candidate.full_name or f"{candidate.first_name} {candidate.last_name}".strip(),
+                    candidate.first_name or '',
+                    candidate.last_name or '',
+                    candidate.phone or '',
+                    candidate.alternate_phone or '',
+                    candidate.email or '',
+                    candidate.current_location or '',
+                    candidate.preferred_location or '',
+                    candidate.target_job_role.name if candidate.target_job_role else '',
+                    candidate.current_role or '',
+                    candidate.current_company or '',
+                    str(candidate.total_experience_years) if candidate.total_experience_years is not None else '',
+                    candidate.get_collar_type_display() if hasattr(candidate, 'get_collar_type_display') and candidate.collar_type else candidate.collar_type or '',
+                    candidate.get_billing_type_display() if hasattr(candidate, 'get_billing_type_display') and candidate.billing_type else candidate.billing_type or '',
+                    candidate.lifecycle_status or '',
+                    candidate.availability_status or '',
+                    candidate.notice_period_days if candidate.notice_period_days is not None else '',
+                    f"{candidate.current_ctc:.2f}" if candidate.current_ctc is not None else '',
+                    f"{candidate.expected_ctc:.2f}" if candidate.expected_ctc is not None else '',
+                    skills_str,
+                    'Yes' if resume_count > 0 else 'No',
+                    resume_count,
+                    candidate.source or '',
+                    candidate.created_at.strftime('%Y-%m-%d %H:%M:%S') if hasattr(candidate, 'created_at') and candidate.created_at else '',
+                ]
+                yield writer.writerow(row)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"candidates_export_{timestamp}.csv"
+        response = StreamingHttpResponse(stream_csv(), content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
 
     @action(detail=True, methods=['post'], url_path='merge')
     def merge(self, request, pk=None):

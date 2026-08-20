@@ -37,9 +37,39 @@ export interface ListCandidatesParams {
   page?: number
 }
 
-export async function listCandidates(params?: ListCandidatesParams): Promise<{ items: CandidateRow[]; count?: number }> {
+export interface ListCandidatesResult {
+  items: CandidateRow[]
+  count?: number
+  with_resume_count?: number
+  without_resume_count?: number
+}
+
+export async function listCandidates(params?: ListCandidatesParams): Promise<ListCandidatesResult> {
   const res = await api.get('/api/talent/candidates/', { params })
-  return unwrapDrfResults<CandidateRow>(res.data)
+  const unwrapped = unwrapDrfResults<CandidateRow>(res.data)
+  return {
+    items: unwrapped.items,
+    count: unwrapped.count,
+    with_resume_count: res.data?.with_resume_count,
+    without_resume_count: res.data?.without_resume_count,
+  }
+}
+
+/** GET /api/talent/candidates/export/ - downloads candidate list as CSV */
+export async function exportCandidatesCsv(params?: ListCandidatesParams): Promise<void> {
+  const exportParams = { ...params }
+  delete exportParams.page
+  const res = await api.get('/api/talent/candidates/export/', {
+    params: exportParams,
+    responseType: 'blob',
+  })
+  const disposition = res.headers['content-disposition'] as string | undefined
+  let filename = `candidates_export_${new Date().toISOString().slice(0, 10)}.csv`
+  if (disposition && disposition.includes('filename=')) {
+    const match = disposition.match(/filename=["']?([^"';]+)["']?/)
+    if (match?.[1]) filename = match[1]
+  }
+  saveBlob(res.data as Blob, filename)
 }
 
 export async function getCandidate(id: number): Promise<CandidateRow> {
