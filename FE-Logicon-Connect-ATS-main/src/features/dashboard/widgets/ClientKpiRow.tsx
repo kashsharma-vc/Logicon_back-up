@@ -1,13 +1,13 @@
 import { Link } from 'react-router-dom'
-import { Banknote, Building2, ClipboardCheck, FileText, MapPin, Users } from 'lucide-react'
+import { ClipboardCheck, FileText, MapPin, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { formatCount, formatMoney } from '@/features/dashboard/dashboardFormatters'
+import { formatCount } from '@/features/dashboard/dashboardFormatters'
 
 interface ClientKpiRowProps {
   activeSites: number
-  approvedBudgets: number
-  availableBudget: string
+  approvedBudgets?: number
+  availableBudget?: string
   mrfsInApproval: number
   candidateReviewsPending: number | null
   deployedEmployees: number | null
@@ -41,19 +41,15 @@ function KpiCard({ tile }: { tile: KpiTile }) {
   )
 }
 
-/** Compact KPI tiles for the client dashboard. Counts may be null while loading/failed -> shown as "—". */
+/** Compact operational KPI tiles for the client dashboard. */
 export function ClientKpiRow({
   activeSites,
-  approvedBudgets,
-  availableBudget,
   mrfsInApproval,
   candidateReviewsPending,
   deployedEmployees,
 }: ClientKpiRowProps) {
   const tiles: KpiTile[] = [
     { label: 'Active sites', value: formatCount(activeSites), icon: MapPin, to: '/sites' },
-    { label: 'Approved budgets', value: formatCount(approvedBudgets), icon: Building2, to: '/budgets' },
-    { label: 'Available budget', value: formatMoney(availableBudget), icon: Banknote, to: '/budgets' },
     { label: 'MRFs in approval', value: formatCount(mrfsInApproval), icon: FileText, to: '/mrf' },
     {
       label: 'Candidate reviews pending',
@@ -70,7 +66,7 @@ export function ClientKpiRow({
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {tiles.map((tile) => (
         <KpiCard key={tile.label} tile={tile} />
       ))}

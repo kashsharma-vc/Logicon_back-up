@@ -364,21 +364,44 @@ export function CandidatesListPage() {
     }
   }, [])
 
+function isValidRoleOption(name: string | undefined | null): boolean {
+  if (!name || !name.trim()) return false
+  const s = name.trim()
+  // Reject email addresses
+  if (s.includes('@') || /\.com$/i.test(s) || /\.in$/i.test(s)) return false
+  // Reject dates or timestamps
+  if (s.includes('00:00:00') || /\d{4}-\d{2}-\d{2}/.test(s) || /\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/.test(s)) return false
+  // Reject phone numbers / pure digits
+  const digits = s.replace(/\D/g, '')
+  if (digits.length >= 8 && digits.length / s.length > 0.6) return false
+  // Reject URLs
+  if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('www.')) return false
+  if (s.length > 70) return false
+  return true
+}
+
   const allDropdownRoles = useMemo(() => {
     const roleMap = new Map<number, { id: number; name: string }>()
     for (const r of roles) {
-      if (r.id) roleMap.set(r.id, { id: r.id, name: r.name })
+      if (r.id && isValidRoleOption(r.name)) {
+        roleMap.set(r.id, { id: r.id, name: r.name.trim() })
+      }
     }
     for (const c of rows) {
       if (c.mapped_job_roles) {
         for (const mr of c.mapped_job_roles) {
-          if (mr.id && !roleMap.has(mr.id)) {
-            roleMap.set(mr.id, { id: mr.id, name: mr.name })
+          if (mr.id && isValidRoleOption(mr.name) && !roleMap.has(mr.id)) {
+            roleMap.set(mr.id, { id: mr.id, name: mr.name.trim() })
           }
         }
       }
-      if (c.target_job_role && c.target_job_role_name && !roleMap.has(c.target_job_role)) {
-        roleMap.set(c.target_job_role, { id: c.target_job_role, name: c.target_job_role_name })
+      if (
+        c.target_job_role &&
+        c.target_job_role_name &&
+        isValidRoleOption(c.target_job_role_name) &&
+        !roleMap.has(c.target_job_role)
+      ) {
+        roleMap.set(c.target_job_role, { id: c.target_job_role, name: c.target_job_role_name.trim() })
       }
     }
     return Array.from(roleMap.values()).sort((a, b) =>

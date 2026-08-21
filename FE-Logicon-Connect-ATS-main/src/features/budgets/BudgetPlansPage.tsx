@@ -30,7 +30,7 @@ import {
   type BudgetPlanRow,
   type BudgetPlanWritePayload,
 } from '@/features/budgets/types'
-import { formatMoneyAmount } from '@/features/budgets/budgetDisplay'
+import { formatMoneyAmount, maskMoneyAmount } from '@/features/budgets/budgetDisplay'
 import { loadAllClients, loadAllDepartments, loadAllSites } from '@/features/budgets/loadPagedLookups'
 
 function parseBoolParam(v: string | null): boolean | undefined {
@@ -52,19 +52,20 @@ function parseNum(v: string | null): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
-function PlanAmountBreakdown({ row }: { row: BudgetPlanRow }) {
+function PlanAmountBreakdown({ row, isClient }: { row: BudgetPlanRow; isClient?: boolean }) {
   const cur = row.currency || 'INR'
+  const fmt = isClient ? maskMoneyAmount : formatMoneyAmount
   return (
     <div className="space-y-0.5 text-sm">
-      <p className="font-medium text-app-text">Total: {formatMoneyAmount(row.amount, cur)}</p>
+      <p className="font-medium text-app-text">Total: {fmt(row.amount, cur)}</p>
       <p className="text-xs text-app-secondary">
-        Reserved budget: {formatMoneyAmount(row.reserved_amount ?? null, cur)}
+        Reserved budget: {fmt(row.reserved_amount ?? null, cur)}
       </p>
       <p className="text-xs text-app-secondary">
-        Committed budget: {formatMoneyAmount(row.committed_amount ?? null, cur)}
+        Committed budget: {fmt(row.committed_amount ?? null, cur)}
       </p>
       <p className="text-xs text-app-secondary">
-        Available budget: {formatMoneyAmount(row.available_amount ?? null, cur)}
+        Available budget: {fmt(row.available_amount ?? null, cur)}
       </p>
     </div>
   )
@@ -371,7 +372,7 @@ export function BudgetPlansPage() {
             <p>
               <span className="text-app-subtle">Period:</span> {formatBudgetPeriod(r.period_start, r.period_end)}
             </p>
-            <PlanAmountBreakdown row={r} />
+            <PlanAmountBreakdown row={r} isClient={isClient} />
             {r.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="neutral">Inactive</Badge>}
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -651,7 +652,7 @@ export function BudgetPlansPage() {
                       {formatBudgetPeriod(r.period_start, r.period_end)}
                     </TD>
                     <TD className="max-w-[200px] py-2 align-top">
-                      <PlanAmountBreakdown row={r} />
+                      <PlanAmountBreakdown row={r} isClient={isClient} />
                     </TD>
                     <TD className="py-2 align-top">
                       <BudgetStatusBadge status={r.status} />

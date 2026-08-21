@@ -12,6 +12,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { getBreakupComponentStyle, getBreakupRoleBandStyle } from '@/features/sales/salesBreakupGrouping'
 import { buildBudgetRoleGroups } from '@/features/budgets/budgetCommercialGrouping'
+import { maskMoneyAmount } from '@/features/budgets/budgetDisplay'
 
 type TabId = 'overview' | 'budget-lines' | 'salary-breakup'
 
@@ -21,27 +22,9 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'salary-breakup', label: 'Salary Breakup' },
 ]
 
-function formatNumber(value: string | number | null | undefined): string {
-  if (value == null || value === '') return '—'
-  const num = typeof value === 'string' ? parseFloat(value.replace(/,/g, '')) : value
-  if (!Number.isFinite(num)) return '—'
-  const parts = num.toFixed(2).split('.')
-  const intPart = parts[0] ?? '0'
-  const decPart = parts[1] ?? '00'
-  const sign = intPart.startsWith('-') ? '-' : ''
-  const digits = sign ? intPart.slice(1) : intPart
-  const lastThree = digits.slice(-3)
-  const rest = digits.slice(0, -3)
-  const formatted = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + (rest ? ',' : '') + lastThree
-  const body = decPart === '00' ? formatted : `${formatted}.${decPart}`
-  return `${sign}${body}`
-}
-
 function moneyFormatter(currency: string) {
-  const prefix = currency === 'INR' ? '₹' : `${currency} `
   return (value: string | number | null | undefined): string => {
-    const formatted = formatNumber(value)
-    return formatted === '—' ? '—' : `${prefix}${formatted}`
+    return maskMoneyAmount(value, currency)
   }
 }
 

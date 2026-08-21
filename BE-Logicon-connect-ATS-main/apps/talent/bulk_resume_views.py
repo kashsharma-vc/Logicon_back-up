@@ -67,6 +67,30 @@ def _safe_phone_norm(mobile: str, idx: int) -> str:
     return f"99{idx:08d}"
 
 
+def _is_valid_role_name(name: str) -> bool:
+    """Validate that a string is a realistic job role name and not an email, date, phone, or garbage."""
+    if not name:
+        return False
+    s = str(name).strip()
+    # Reject email addresses
+    if '@' in s or re.search(r'@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', s):
+        return False
+    # Reject dates or timestamps
+    if '00:00:00' in s or re.search(r'\d{4}-\d{2}-\d{2}', s) or re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', s):
+        return False
+    # Reject mostly numeric strings / phone numbers
+    digits = ''.join(filter(str.isdigit, s))
+    if len(digits) >= 8 and (len(digits) / max(1, len(s)) > 0.6):
+        return False
+    # Reject URLs
+    if s.startswith('http://') or s.startswith('https://') or s.startswith('www.'):
+        return False
+    # Reject excessively long strings (> 70 chars)
+    if len(s) > 70:
+        return False
+    return True
+
+
 class BulkExcelResumeGenerateView(APIView):
 
     permission_classes = [IsAuthenticated]
@@ -172,37 +196,27 @@ class BulkExcelResumeGenerateView(APIView):
                 mobile = _clean_val(
                     _value(
                         row,
-                        'mobile',
-                        'phone',
-                        'contact',
-                        'mobile_no',
-                        'mobile_number',
-                        'phone_number',
+                        'mobile', 'phone', 'contact', 'mobile_no', 'mobile_number',
+                        'phone_number', 'contact_no', 'ph_no', 'mob', 'cell', 'tel',
+                        'whatsapp', 'candidate_mobile', 'candidate_phone', 'calling_number',
                     )
                 )
 
                 alt_mobile = _clean_val(
                     _value(
                         row,
-                        'alternate_phone',
-                        'alt_phone',
-                        'alternate_number',
-                        'alt_number',
-                        'secondary_phone',
-                        'alt_contact',
-                        'alternate_contact',
-                        'alternate_mobile',
+                        'alternate_phone', 'alt_phone', 'alternate_number', 'alt_number',
+                        'secondary_phone', 'alt_contact', 'alternate_contact',
+                        'alternate_mobile', 'alt_mob', 'other_number', 'emergency_contact',
                     )
                 ) or None
 
                 name = _clean_val(
                     _value(
                         row,
-                        'name',
-                        'full_name',
-                        'candidate_name',
-                        'first_name',
-                        'name_of_candidate',
+                        'name', 'full_name', 'candidate_name', 'first_name',
+                        'name_of_candidate', 'applicant_name', 'applicant',
+                        'employee_name', 'candidate', 'emp_name', 'person_name',
                     )
                 )
 
@@ -212,28 +226,69 @@ class BulkExcelResumeGenerateView(APIView):
                     else ('', '')
                 )
 
-                if not name and (
-                    first_name or last_name
-                ):
-                    name = (
-                        f"{first_name} {last_name}"
-                        .strip()
-                    )
+                if not name and (first_name or last_name):
+                    name = f"{first_name} {last_name}".strip()
 
                 designation = _clean_val(
                     _value(
                         row,
-                        'designation',
-                        'role',
-                        'job_role',
-                        'current_role',
-                        'mapped_role',
-                        'position',
+                        'designation', 'role', 'job_role', 'current_role',
+                        'mapped_role', 'position', 'target_role', 'post',
+                        'trade', 'job_title', 'title', 'profile', 'work_profile',
                     )
                 )
 
+                email = _clean_val(_value(row, 'email', 'email_address', 'mail', 'email_id', 'e_mail', 'mail_id'))
+                location = _clean_val(_value(row, 'current_location', 'location', 'city', 'address', 'work_location', 'place', 'job_location'))
+                experience_raw = _value(row, 'total_experience_years', 'experience_years', 'experience', 'exp', 'total_exp', 'work_exp', 'total_experience', 'yrs_of_exp')
+                company = _clean_val(_value(row, 'current_company', 'company', 'organization', 'employer', 'org', 'current_org', 'prev_company', 'firm'))
+                skills_raw = _clean_val(_value(row, 'skills', 'skill', 'key_skills', 'technical_skills', 'skills_list', 'specialization', 'technologies'))
+
+                # --------------------------------------------------------
+                # Smart Content-Type Auto-Detection across all cell values
+                # (Handles scrambled / misaligned columns gracefully)
+                # --------------------------------------------------------
+                all_cell_vals = [str(v).strip() for k, v in row.items() if k != '_source_row_number' and v not in (None, '')]
+
+                # 1. Auto-detect Email if missing
+                if not email:
+                    for val in all_cell_vals:
+                        if '@' in val and re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', val):
+                            email = val
+                            break
+
+                # 2. Auto-detect Phone if missing
+                if not mobile:
+                    for val in all_cell_vals:
+                        # 10-digit Indian phone pattern
+                        match = re.search(r'\b[6-9]\d{9}\b', val)
+                        if match:
+                            mobile = match.group(0)
+                            break
+                        # Clean digits fallback
+                        digs = ''.join(filter(str.isdigit, val))
+                        if len(digs) == 10 and digs[0] in '6789':
+                            mobile = digs
+                            break
+
+                # 3. Auto-detect Experience if missing
+                if not experience_raw:
+                    for val in all_cell_vals:
+                        match = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yr)\b', val, re.I)
+                        if match:
+                            experience_raw = match.group(1)
+                            break
+
+                # 4. Auto-detect Designation if missing or invalid
+                if not designation or not _is_valid_role_name(designation):
+                    for val in all_cell_vals:
+                        if val != name and val != email and val != location and val != company:
+                            if _is_valid_role_name(val) and len(val) >= 3 and not re.search(r'\b[6-9]\d{9}\b', val):
+                                designation = val
+                                break
+
                 # Completely empty candidate row
-                if not mobile and not name:
+                if not mobile and not name and not email:
                     continue
 
                 # Generate safe fallback phone
@@ -242,41 +297,15 @@ class BulkExcelResumeGenerateView(APIView):
 
                 # Generate fallback name
                 if not name:
+                    mobile_clean = ''.join(filter(str.isdigit, mobile))
+                    name = f"Candidate {mobile_clean[-4:] if len(mobile_clean) >= 4 else idx}"
 
-                    mobile_clean = ''.join(
-                        filter(
-                            str.isdigit,
-                            mobile,
-                        )
-                    )
-
-                    name = (
-                        f"Candidate "
-                        f"{mobile_clean[-4:] if len(mobile_clean) >= 4 else idx}"
-                    )
-
-                # Default designation
-                if not designation:
+                # Final sanitize designation
+                if not designation or not _is_valid_role_name(designation):
                     designation = "General Candidate"
 
-                phone_norm = _safe_phone_norm(
-                    mobile,
-                    idx,
-                )
-
-                alt_phone_norm = (
-                    _safe_phone_norm(
-                        alt_mobile,
-                        idx,
-                    )
-                    if alt_mobile
-                    else None
-                )
-                email = _clean_val(_value(row, 'email', 'email_address', 'mail'))
-                location = _clean_val(_value(row, 'current_location', 'location', 'city', 'address'))
-                experience_raw = _value(row, 'total_experience_years', 'experience_years', 'experience', 'exp')
-                company = _clean_val(_value(row, 'current_company', 'company', 'organization', 'employer'))
-                skills_raw = _clean_val(_value(row, 'skills', 'skill', 'key_skills'))
+                phone_norm = _safe_phone_norm(mobile, idx)
+                alt_phone_norm = _safe_phone_norm(alt_mobile, idx) if alt_mobile else None
 
                 parsed_rows.append(
                     {
@@ -383,7 +412,8 @@ class BulkExcelResumeGenerateView(APIView):
 
                         designation = (
                             cell2
-                            or "General Candidate"
+                            if cell2 and _is_valid_role_name(cell2)
+                            else "General Candidate"
                         )
 
                         parsed_rows.append(
@@ -439,15 +469,16 @@ class BulkExcelResumeGenerateView(APIView):
 
         for desig in designation_names:
 
+            if not _is_valid_role_name(desig):
+                continue
+
             role_key = desig.lower()
 
             if role_key not in existing_roles:
 
                 role_code = (
-                    desig
-                    .lower()
-                    .replace(" ", "_")[:64]
-                )
+                    re.sub(r'[^a-zA-Z0-9_]+', '_', desig.lower()).strip('_')[:64]
+                ) or f"role_{len(roles_to_create)+1}"
 
                 roles_to_create.append(
                     JobRole(

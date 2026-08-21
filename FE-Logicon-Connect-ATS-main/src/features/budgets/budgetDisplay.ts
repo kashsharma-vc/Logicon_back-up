@@ -11,6 +11,24 @@ export function formatMoneyAmount(amount: string | null | undefined, currency = 
   return formatBudgetAmount(String(amount), currency || 'INR')
 }
 
+/** Masks a money amount for client audience, e.g. 34450.00 -> ₹344** */
+export function maskMoneyAmount(amount: string | number | null | undefined, currency = 'INR'): string {
+  if (amount == null || String(amount).trim() === '') return '—'
+  const prefix = currency === 'INR' ? '₹' : `${currency} `
+  const rawStr = String(amount).replace(/,/g, '').trim()
+  const num = parseFloat(rawStr)
+  if (!Number.isFinite(num)) return '—'
+  if (num === 0) return `${prefix}0**`
+
+  const intStr = Math.round(num).toString()
+  if (intStr.length <= 2) {
+    return `${prefix}${intStr}**`
+  }
+  const visible = intStr.slice(0, 3)
+  const masked = '*'.repeat(Math.max(2, intStr.length - 3))
+  return `${prefix}${visible}${masked}`
+}
+
 export function budgetReservationStatusLabel(status: BudgetReservationStatus | string | null | undefined): string {
   if (status == null || status === '') return 'Not reserved'
   switch (status) {

@@ -1,4 +1,4 @@
-﻿export interface TokenPair {
+export interface TokenPair {
   access: string
   refresh: string
 }

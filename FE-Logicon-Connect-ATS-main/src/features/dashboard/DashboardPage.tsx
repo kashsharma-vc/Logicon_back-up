@@ -169,8 +169,6 @@ export function DashboardPage() {
       {isClient ? (
         <ClientKpiRow
           activeSites={sections.client_overview.site_count}
-          approvedBudgets={sections.budget.plan_count}
-          availableBudget={sections.budget.available_amount}
           mrfsInApproval={sections.mrf.in_review}
           candidateReviewsPending={pendingReviews}
           deployedEmployees={deployedEmployees}
@@ -181,19 +179,16 @@ export function DashboardPage() {
       {isClient ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {/* Row 1: My work + Client overview */}
-          <div className={SPAN_SINGLE}>
+          <div className={SPAN_DOUBLE}>
             <MyWorkWidget data={sections.my_work} />
           </div>
           <div className={SPAN_DOUBLE}>
             <ClientOverviewWidget data={sections.client_overview} compactForClientAudience />
           </div>
 
-          {/* Row 2: MRF + Budget charts */}
-          <div className={SPAN_DOUBLE}>
+          {/* Row 2: MRF summary */}
+          <div className={SPAN_FULL}>
             <MRFSummaryWidget data={sections.mrf} />
-          </div>
-          <div className={SPAN_DOUBLE}>
-            <BudgetSummaryWidget data={sections.budget} />
           </div>
 
           {/* Row 3: Recent activity */}
