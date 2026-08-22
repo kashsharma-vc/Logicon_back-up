@@ -144,6 +144,8 @@ function Stat({
 // ─── Pool filters ─────────────────────────────────────────────────────────────
 
 interface PoolFilters {
+  role: string
+  search: string
   skills: string
   location: string
   minExp: string
@@ -152,6 +154,8 @@ interface PoolFilters {
 }
 
 const BLANK_POOL_FILTERS: PoolFilters = {
+  role: '',
+  search: '',
   skills: '',
   location: '',
   minExp: '',
@@ -174,6 +178,8 @@ function CandidatePoolTab({
 }) {
   const needsClientReview = demandRequiresClientReview(demand)
   const [filters, setFilters] = useState<PoolFilters>(BLANK_POOL_FILTERS)
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(25)
   const [rows, setRows] = useState<CandidatePoolResultRow[]>([])
   const [count, setCount] = useState<number | undefined>()
   const [loading, setLoading] = useState(false)
@@ -188,7 +194,13 @@ function CandidatePoolTab({
     setLoading(true)
     setError(null)
     try {
-      const params: Record<string, string | number> = { ranked: 'true' }
+      const params: Record<string, string | number> = {
+        ranked: 'true',
+        page,
+        page_size: pageSize,
+      }
+      if (filters.role.trim()) params.role = filters.role.trim()
+      if (filters.search.trim()) params.search = filters.search.trim()
       if (filters.skills.trim()) params.skills = filters.skills.trim()
       if (filters.location.trim()) params.location = filters.location.trim()
       if (filters.minExp.trim()) params.min_experience = filters.minExp.trim()
@@ -202,7 +214,7 @@ function CandidatePoolTab({
     } finally {
       setLoading(false)
     }
-  }, [demandId, filters])
+  }, [demandId, filters, page, pageSize])
 
   useEffect(() => {
     void load()
@@ -210,6 +222,7 @@ function CandidatePoolTab({
 
   function setFilter(key: keyof PoolFilters, value: string) {
     setFilters((prev) => ({ ...prev, [key]: value }))
+    setPage(1)
   }
 
   async function handleShortlist(row: CandidatePoolResultRow) {
@@ -236,23 +249,27 @@ function CandidatePoolTab({
     }
   }
 
-  const inputCls =
-    'h-7 w-full rounded border border-app-border bg-app-surface px-2 text-xs text-app-text placeholder-app-muted focus:outline-none focus:ring-1 focus:ring-brand-500'
+  const totalPages = count ? Math.max(1, Math.ceil(count / pageSize)) : 1
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2 rounded-panel border border-app-border bg-app-surface p-3 shadow-panel">
+        <FilterField label="Role / Title" value={filters.role} onChange={(v) => setFilter('role', v)} placeholder="e.g. Plumber, Driver, Helper" />
+        <FilterField label="Search candidate" value={filters.search} onChange={(v) => setFilter('search', v)} placeholder="Name, phone, email" />
         <FilterField label="Required skills" value={filters.skills} onChange={(v) => setFilter('skills', v)} placeholder="e.g. electrician" />
         <FilterField label="Preferred location" value={filters.location} onChange={(v) => setFilter('location', v)} placeholder="City or state" />
-        <FilterField label="Minimum experience" value={filters.minExp} onChange={(v) => setFilter('minExp', v)} placeholder="e.g. 2" type="number" />
-        <FilterField label="Maximum experience" value={filters.maxExp} onChange={(v) => setFilter('maxExp', v)} placeholder="e.g. 10" type="number" />
-        <FilterField label="Minimum match score (0–100)" value={filters.minScore} onChange={(v) => setFilter('minScore', v)} placeholder="e.g. 70" type="number" />
+        <FilterField label="Min experience (yrs)" value={filters.minExp} onChange={(v) => setFilter('minExp', v)} placeholder="e.g. 2" type="number" />
+        <FilterField label="Max experience (yrs)" value={filters.maxExp} onChange={(v) => setFilter('maxExp', v)} placeholder="e.g. 10" type="number" />
+        <FilterField label="Min score (0–100)" value={filters.minScore} onChange={(v) => setFilter('minScore', v)} placeholder="e.g. 50" type="number" />
         <div className="flex items-end gap-2 ml-auto">
           <Button
             type="button"
             variant="secondary"
             className="min-h-7 gap-1 px-2 text-xs"
-            onClick={() => setFilters(BLANK_POOL_FILTERS)}
+            onClick={() => {
+              setFilters(BLANK_POOL_FILTERS)
+              setPage(1)
+            }}
             disabled={loading}
           >
             Clear
@@ -268,7 +285,7 @@ function CandidatePoolTab({
           </Button>
         </div>
         <p className="w-full text-xs text-app-subtle">
-          Scores are calculated from parsed resume details and candidate profile data.
+          Showing ranked candidate matches from resume pool. Use the filters above to search across all candidate records.
         </p>
       </div>
 
@@ -288,8 +305,8 @@ function CandidatePoolTab({
       {loading && rows.length === 0 ? <Spinner label="Loading ranked candidates…" /> : null}
       {!loading && !error && rows.length === 0 ? (
         <EmptyState
-          title="No candidates in pool"
-          description="Adjust filters or check back after more resumes are indexed."
+          title="No candidates found in pool"
+          description="Try adjusting role/search filters or clearing minimum match score."
         />
       ) : null}
 
@@ -315,18 +332,32 @@ function CandidatePoolTab({
                 const rowErr = shortlistErrors[cid] ?? ''
                 const expanded = expandedId === cid
                 const colSpan = 7
-                void inputCls
+                const itemIndex = (page - 1) * pageSize + idx + 1
                 return (
                   <Fragment key={cid}>
                     <TR>
-                      <TD className="py-2 text-xs text-app-subtle">{idx + 1}</TD>
+                      <TD className="py-2 text-xs text-app-subtle">{itemIndex}</TD>
                       <TD className="py-2">
                         <p className="text-sm font-medium text-app-text">{candidateName(row)}</p>
                         <p className="font-mono text-xs text-app-secondary">{row.candidate.phone}</p>
                       </TD>
                       <TD className="py-2 text-xs text-app-secondary">
-                        <p>{row.candidate.current_role?.trim() || '—'}</p>
-                        <p>{row.candidate.current_location?.trim() || '—'}</p>
+                        <p className="font-medium text-app-text">{row.candidate.current_role?.trim() || row.candidate.target_job_role_name?.trim() || '—'}</p>
+                        <p>{row.candidate.current_location?.trim() || row.candidate.preferred_location?.trim() || '—'}</p>
+                        {row.candidate.collar_type || row.candidate.billing_type ? (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {row.candidate.collar_type ? (
+                              <span className="inline-block rounded bg-app-muted/60 px-1 py-0.5 text-[9px] text-app-secondary uppercase tracking-tight">
+                                {row.candidate.collar_type.replace('_', ' ')}
+                              </span>
+                            ) : null}
+                            {row.candidate.billing_type ? (
+                              <span className="inline-block rounded bg-app-muted/60 px-1 py-0.5 text-[9px] text-app-secondary uppercase tracking-tight">
+                                {row.candidate.billing_type.replace('_', ' ')}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </TD>
                       <TD className="py-2 text-xs">{fmtExp(row.candidate.total_experience_years)}</TD>
                       <TD className="py-2 text-xs font-semibold tabular-nums">{formatMatchScore(row.score)}</TD>
@@ -387,7 +418,42 @@ function CandidatePoolTab({
               })}
             </TBody>
           </Table>
-          {count != null ? <p className="px-3 py-2 text-xs text-app-subtle">Total: {count}</p> : null}
+
+          {/* Pagination Controls */}
+          {count != null ? (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border px-4 py-3 bg-app-surface">
+              <p className="text-xs text-app-secondary">
+                Showing <span className="font-semibold text-app-text">{(page - 1) * pageSize + 1}</span> to{' '}
+                <span className="font-semibold text-app-text">{Math.min(page * pageSize, count)}</span> of{' '}
+                <span className="font-semibold text-app-text">{count}</span> candidates
+              </p>
+              {totalPages > 1 ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-7 px-2.5 text-xs"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs font-medium text-app-secondary px-1">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-7 px-2.5 text-xs"
+                    disabled={page >= totalPages || loading}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

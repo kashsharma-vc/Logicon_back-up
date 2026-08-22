@@ -53,6 +53,8 @@ class HasCapability(BasePermission):
 
         if not capability:
             return False
+        if isinstance(capability, (list, tuple, set)):
+            return user_has_any_capability(request.user, capability)
         return user_has_capability(request.user, capability)
 
 

@@ -187,6 +187,8 @@ export async function convertApplicationToDeployment(
 
 export interface RankedCandidatePoolParams {
   ranked?: 'true' | 'false'
+  role?: string
+  search?: string
   min_score?: string | number
   save_results?: 'true' | 'false'
   skills?: string
@@ -194,6 +196,7 @@ export interface RankedCandidatePoolParams {
   max_experience?: string | number
   location?: string
   page?: number
+  page_size?: number
 }
 
 export async function getRankedCandidatePool(

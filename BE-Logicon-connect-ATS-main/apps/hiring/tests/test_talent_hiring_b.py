@@ -7,8 +7,10 @@ Phase Talent-Hiring-B — 30 API tests covering:
   Hiring demand (23-25), Match results (26-28), Regression (29-30).
 """
 
+import datetime
 from decimal import Decimal
 
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -1050,7 +1052,7 @@ class TestInterviewLifecycleAPI(HiringBBase):
             {
                 'hiring_application': app.pk,
                 'offered_ctc': '30000.00',
-                'joining_date': '2026-06-20',
+                'joining_date': (timezone.now().date() + datetime.timedelta(days=30)).isoformat(),
             },
             format='json',
         )

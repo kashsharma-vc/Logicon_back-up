@@ -87,7 +87,7 @@ const ITEMS = {
 
   // Hiring & deployment
   interviewPipeline: { path: '/hiring/pipeline', label: 'Interview pipeline', icon: KanbanSquare, requiredCapabilities: [CAP.HIRING_APPLICATION_READ] },
-  interviewAssignments: { path: '/hiring/interview-assignments', label: 'Interview assignments', icon: ClipboardCheck, requiredCapabilities: [CAP.INTERVIEW_READ] },
+  interviewAssignments: { path: '/hiring/interview-assignments', label: 'Interview assignments', icon: ClipboardCheck, requiredCapabilities: [CAP.INTERVIEW_READ, CAP.INTERVIEW_ASSIGNMENT_READ] },
   hiringDemands: { path: '/hiring/demands', label: 'Hiring demands', icon: ClipboardList, requiredCapabilities: [CAP.HIRING_APPLICATION_READ] },
   hiringApplications: { path: '/hiring/applications', label: 'Hiring applications', icon: Briefcase, requiredCapabilities: [CAP.HIRING_APPLICATION_READ] },
   resumePool: { path: '/candidates', label: 'Resume pool', icon: UserSearch, requiredCapabilities: [CAP.CANDIDATE_READ] },
@@ -147,7 +147,7 @@ const ITEMS = {
 export const navGroups: NavGroup[] = [
   {
     label: 'Workspace',
-    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks],
+    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks, ITEMS.interviewAssignments],
   },
   {
     label: 'Organization',
@@ -235,7 +235,7 @@ export const navGroups: NavGroup[] = [
 const salesNavGroups: NavGroup[] = [
   {
     label: 'Workspace',
-    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks],
+    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks, ITEMS.interviewAssignments],
   },
   {
     label: 'Sales pipeline',
@@ -262,7 +262,7 @@ const salesNavGroups: NavGroup[] = [
 const operationsNavGroups: NavGroup[] = [
   {
     label: 'Workspace',
-    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks],
+    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks, ITEMS.interviewAssignments],
   },
   {
     label: 'Operations work',
@@ -311,7 +311,7 @@ const operationsNavGroups: NavGroup[] = [
 const financeNavGroups: NavGroup[] = [
   {
     label: 'Workspace',
-    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks],
+    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks, ITEMS.interviewAssignments],
   },
   {
     label: 'Commercials',
@@ -330,7 +330,7 @@ const financeNavGroups: NavGroup[] = [
 const hrNavGroups: NavGroup[] = [
   {
     label: 'Overview',
-    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks],
+    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks, ITEMS.interviewAssignments],
   },
   {
     label: 'Talent sourcing',
@@ -369,7 +369,7 @@ const hrNavGroups: NavGroup[] = [
 const clientPortalGroups: NavGroup[] = [
   {
     label: 'Account',
-    items: [ITEMS.dashboard, ITEMS.companyProfile, ITEMS.clientSites, ITEMS.clientSiteRoleReqs],
+    items: [ITEMS.dashboard, ITEMS.myAccess, ITEMS.myTasks, ITEMS.interviewAssignments, ITEMS.companyProfile, ITEMS.clientSites, ITEMS.clientSiteRoleReqs],
   },
   {
     label: 'Commercials',
@@ -381,7 +381,7 @@ const clientPortalGroups: NavGroup[] = [
   },
   {
     label: 'Requests',
-    items: [ITEMS.clientMrf, ITEMS.clientCandidateReview],
+    items: [ITEMS.clientMrf, ITEMS.clientCandidateReview, ITEMS.interviewAssignments],
   },
 ]
 

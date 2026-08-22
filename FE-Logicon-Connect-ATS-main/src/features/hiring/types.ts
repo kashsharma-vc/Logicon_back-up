@@ -240,6 +240,11 @@ export interface PoolCandidateSummary {
   current_role?: string | null
   current_company?: string | null
   current_location?: string | null
+  preferred_location?: string | null
+  collar_type?: string | null
+  billing_type?: string | null
+  target_job_role?: number | null
+  target_job_role_name?: string | null
   total_experience_years?: string | number | null
   skills_count?: number
   lifecycle_status?: string

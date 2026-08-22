@@ -21,6 +21,7 @@ from apps.access.capabilities import (
     PIPELINE_STAGE_READ, CANDIDATE_MATCH_READ, MRF_READ,
     DEPLOYMENT_CREATE, EMPLOYEE_CREATE, SITE_DEPLOYMENT_CREATE,
     INTERVIEW_READ, INTERVIEW_CREATE, INTERVIEW_MANAGE,
+    INTERVIEW_ASSIGNMENT_READ, INTERVIEW_FEEDBACK_CREATE,
     OFFER_READ, OFFER_CREATE, OFFER_UPDATE, OFFER_APPROVE, OFFER_MANAGE,
     get_user_capabilities, is_client_facing_user,
 )
@@ -755,7 +756,7 @@ class HiringDemandViewSet(ReadOnlyModelViewSet):
         Returns candidates eligible for this demand.
         ?ranked=true (default): scored + ranked via matching engine.
         ?ranked=false: flat-filtered list (legacy behaviour).
-        Ranked supports: skills, min_experience, max_experience, location,
+        Ranked supports: role, search, skills, min_experience, max_experience, location,
                          min_score, save_results (default true).
         """
         demand = self.get_object()
@@ -776,37 +777,57 @@ class HiringDemandViewSet(ReadOnlyModelViewSet):
             lifecycle_status__in=['active', 'available'],
         ).exclude(id__in=linked_candidate_ids).distinct()
 
-        ranked_param = request.query_params.get('ranked', 'true').strip().lower()
-        if ranked_param == 'false':
-            # Legacy flat-filter path
-            role = request.query_params.get('role', '').strip()
-            if role:
-                base_qs = base_qs.filter(current_role__icontains=role)
+        # Shared query filters for both ranked and flat
+        role = request.query_params.get('role', '').strip()
+        if role:
+            base_qs = base_qs.filter(
+                Q(current_role__icontains=role) |
+                Q(target_job_role__name__icontains=role) |
+                Q(experiences__job_title__icontains=role)
+            ).distinct()
 
-            location = request.query_params.get('location', '').strip()
-            if location:
-                base_qs = base_qs.filter(current_location__icontains=location)
+        search = request.query_params.get('search', '').strip()
+        if search:
+            base_qs = base_qs.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(phone__icontains=search) |
+                Q(email__icontains=search) |
+                Q(current_role__icontains=search) |
+                Q(target_job_role__name__icontains=search)
+            ).distinct()
 
-            skill = request.query_params.get('skill', '').strip()
-            if skill:
+        location = request.query_params.get('location', '').strip()
+        if location:
+            base_qs = base_qs.filter(
+                Q(current_location__icontains=location) |
+                Q(preferred_location__icontains=location)
+            ).distinct()
+
+        skill = (request.query_params.get('skill', '') or request.query_params.get('skills', '')).strip()
+        if skill:
+            skill_tokens = [s.strip().lower() for s in skill.split(',') if s.strip()]
+            for sk in skill_tokens:
                 base_qs = base_qs.filter(
-                    skills__normalized_skill_name__icontains=skill.lower()
+                    skills__normalized_skill_name__icontains=sk
                 ).distinct()
 
-            min_exp = request.query_params.get('min_experience', '').strip()
-            if min_exp:
-                try:
-                    base_qs = base_qs.filter(total_experience_years__gte=Decimal(min_exp))
-                except InvalidOperation:
-                    pass
+        min_exp = request.query_params.get('min_experience', '').strip()
+        if min_exp:
+            try:
+                base_qs = base_qs.filter(total_experience_years__gte=Decimal(min_exp))
+            except (InvalidOperation, ValueError):
+                pass
 
-            max_exp = request.query_params.get('max_experience', '').strip()
-            if max_exp:
-                try:
-                    base_qs = base_qs.filter(total_experience_years__lte=Decimal(max_exp))
-                except InvalidOperation:
-                    pass
+        max_exp = request.query_params.get('max_experience', '').strip()
+        if max_exp:
+            try:
+                base_qs = base_qs.filter(total_experience_years__lte=Decimal(max_exp))
+            except (InvalidOperation, ValueError):
+                pass
 
+        ranked_param = request.query_params.get('ranked', 'true').strip().lower()
+        if ranked_param == 'false':
             ctx = {'request': request}
             page = self.paginate_queryset(base_qs)
             if page is not None:
@@ -815,10 +836,34 @@ class HiringDemandViewSet(ReadOnlyModelViewSet):
                 )
             return Response(CandidateSerializer(base_qs, many=True, context=ctx).data)
 
-        # Ranked path
+        # Ranked path:
+        # Pre-select matching candidate set if base_qs is huge to avoid evaluating 20,000+ candidates in Python memory
+        job_role = demand.job_role
+        candidates_to_rank = base_qs
+        total_in_pool = base_qs.count()
+        if total_in_pool > 500 and not role and not search:
+            if job_role:
+                role_name = job_role.name.strip()
+                direct_match = base_qs.filter(
+                    Q(target_job_role=job_role) |
+                    Q(current_role__icontains=role_name) |
+                    Q(experiences__job_title__icontains=role_name)
+                ).distinct()
+                direct_count = direct_match.count()
+                if direct_count < 200:
+                    other_ids = base_qs.exclude(
+                        id__in=direct_match.values_list('id', flat=True)
+                    ).values_list('id', flat=True)[:500 - direct_count]
+                    target_ids = list(direct_match.values_list('id', flat=True)) + list(other_ids)
+                    candidates_to_rank = base_qs.filter(id__in=target_ids)
+                else:
+                    candidates_to_rank = direct_match
+            else:
+                candidates_to_rank = base_qs[:500]
+
         save_results = request.query_params.get('save_results', 'true').strip().lower() != 'false'
         results = rank_candidates(
-            demand, base_qs, request.query_params, save_results=False,
+            demand, candidates_to_rank, request.query_params, save_results=False,
             user=request.user,
         )
 
@@ -1147,10 +1192,10 @@ class InterviewViewSet(ActionCapabilityMixin, ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     action_required_capabilities = {
         'list': INTERVIEW_READ,
-        'retrieve': INTERVIEW_READ,
+        'retrieve': (INTERVIEW_READ, INTERVIEW_ASSIGNMENT_READ),
         'create': INTERVIEW_CREATE,
         'partial_update': INTERVIEW_MANAGE,
-        'assignments': INTERVIEW_READ,
+        'assignments': (INTERVIEW_READ, INTERVIEW_ASSIGNMENT_READ),
     }
 
     def get_queryset(self):
@@ -1159,11 +1204,12 @@ class InterviewViewSet(ActionCapabilityMixin, ModelViewSet):
         if user.is_superuser:
             return qs
         paths = get_accessible_scope_paths(user)
+        interviewer_q = Q(interviewer=user)
         if not paths:
-            return qs.none()
+            return qs.filter(interviewer_q)
         site_q = _scope_q('hiring_application__site__scope_node__path', paths)
         client_q = _scope_q('hiring_application__site__client__scope_node__path', paths)
-        return qs.filter(site_q | client_q).distinct()
+        return qs.filter(site_q | client_q | interviewer_q).distinct()
 
     filterset_fields = ['hiring_application', 'round_type', 'status', 'mode', 'interviewer']
 
@@ -1274,9 +1320,9 @@ class InterviewFeedbackViewSet(ActionCapabilityMixin, ModelViewSet):
     permission_classes = [IsAuthenticated, HasCapability]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     action_required_capabilities = {
-        'list': INTERVIEW_READ,
-        'retrieve': INTERVIEW_READ,
-        'create': INTERVIEW_CREATE,
+        'list': (INTERVIEW_READ, INTERVIEW_ASSIGNMENT_READ),
+        'retrieve': (INTERVIEW_READ, INTERVIEW_ASSIGNMENT_READ),
+        'create': (INTERVIEW_CREATE, INTERVIEW_FEEDBACK_CREATE),
         'partial_update': INTERVIEW_MANAGE,
     }
 
@@ -1286,11 +1332,12 @@ class InterviewFeedbackViewSet(ActionCapabilityMixin, ModelViewSet):
         if user.is_superuser:
             return qs
         paths = get_accessible_scope_paths(user)
+        interviewer_q = Q(interview__interviewer=user) | Q(given_by=user)
         if not paths:
-            return qs.none()
+            return qs.filter(interviewer_q)
         site_q = _scope_q('interview__hiring_application__site__scope_node__path', paths)
         client_q = _scope_q('interview__hiring_application__site__client__scope_node__path', paths)
-        return qs.filter(site_q | client_q).distinct()
+        return qs.filter(site_q | client_q | interviewer_q).distinct()
 
     filterset_fields = ['interview', 'recommendation', 'given_by']
 

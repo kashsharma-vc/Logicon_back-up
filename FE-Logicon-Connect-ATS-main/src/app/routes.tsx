@@ -445,7 +445,7 @@ export const router = createBrowserRouter([
           {
             path: 'hiring/interview-assignments',
             element: (
-              <RequireCapability anyOf={[CAP.INTERVIEW_READ]}>
+              <RequireCapability anyOf={[CAP.INTERVIEW_READ, CAP.INTERVIEW_ASSIGNMENT_READ]}>
                 <InterviewAssignmentsPage />
               </RequireCapability>
             ),

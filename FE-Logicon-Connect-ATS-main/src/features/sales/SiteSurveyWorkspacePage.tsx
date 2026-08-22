@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, FileText, Info, MapPin, Play, Plus, Settings2, Users, Wrench } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, FileText, Info, MapPin, Play, Plus, Search, Settings2, Users, Wrench } from 'lucide-react'
 import {
   assignSiteSurveyOwner,
   createSiteSurveyEquipmentLine,
@@ -22,7 +22,7 @@ import {
   updateSiteSurveyShiftDeployment,
 } from '@/api/sales'
 import type { UserRow } from '@/api/users'
-import { listJobRoles, type JobRoleRow } from '@/api/jobs'
+import { fetchAllJobRoles, type JobRoleRow } from '@/api/jobs'
 import { ROUTES } from '@/app/routes'
 import { useAuthStore } from '@/features/auth/authStore'
 import { surveyStatusLabel, surveyStatusVariant, formatShortDate } from '@/features/sales/salesUtils'
@@ -641,6 +641,19 @@ export function SiteSurveyWorkspacePage() {
   const [jobRoles, setJobRoles] = useState<JobRoleRow[]>([])
   const [jobRolesLoading, setJobRolesLoading] = useState(false)
   const [selectedJobRoleId, setSelectedJobRoleId] = useState<string>('')
+  const [roleSearchQuery, setRoleSearchQuery] = useState<string>('')
+  const [importingMappedRoles, setImportingMappedRoles] = useState(false)
+
+  const filteredJobRoles = useMemo(() => {
+    if (!roleSearchQuery.trim()) return jobRoles
+    const q = roleSearchQuery.toLowerCase()
+    return jobRoles.filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.code.toLowerCase().includes(q) ||
+        (r.skill_category_display && r.skill_category_display.toLowerCase().includes(q))
+    )
+  }, [jobRoles, roleSearchQuery])
 
   const seededRef = useRef(false)
 
@@ -714,8 +727,8 @@ export function SiteSurveyWorkspacePage() {
   useEffect(() => {
     if (!addDeploymentOpen) return
     setJobRolesLoading(true)
-    listJobRoles({ is_active: true })
-      .then((res) => setJobRoles(res.items))
+    fetchAllJobRoles({ is_active: true })
+      .then((items) => setJobRoles(items))
       .catch(() => setJobRoles([]))
       .finally(() => setJobRolesLoading(false))
   }, [addDeploymentOpen])
@@ -947,8 +960,62 @@ export function SiteSurveyWorkspacePage() {
       setShiftDeployments((prev) => [...prev, created])
       setAddDeploymentOpen(false)
       setSelectedJobRoleId('')
+      setRoleSearchQuery('')
     } catch (e: unknown) {
       setActionError(parseApiError(e, 'Failed to add role').message)
+    }
+  }
+
+  async function handleImportAllMappedRoles() {
+    if (roleMappings.length === 0) {
+      setActionError('No active survey role mappings found in Masters.')
+      return
+    }
+    setImportingMappedRoles(true)
+    setActionError(null)
+    try {
+      const existingRoleIds = new Set(
+        shiftDeployments.map((d) => d.job_role).filter(Boolean)
+      )
+      const existingDescriptions = new Set(
+        shiftDeployments.map((d) => d.description?.trim().toLowerCase()).filter(Boolean)
+      )
+
+      const toAdd = roleMappings.filter((m) => {
+        const descMatch = existingDescriptions.has(m.description_text.trim().toLowerCase())
+        const roleMatch = m.job_role ? existingRoleIds.has(m.job_role) : false
+        return !descMatch && !roleMatch
+      })
+
+      if (toAdd.length === 0) {
+        setActionError('All active mapped roles are already in this survey table.')
+        setImportingMappedRoles(false)
+        return
+      }
+
+      const createdList: SiteSurveyShiftDeployment[] = []
+      let sortOrder = shiftDeployments.length + 1
+      for (const m of toAdd) {
+        const created = await createSiteSurveyShiftDeployment({
+          survey: surveyId,
+          job_role: m.job_role,
+          description: m.description_text,
+          general_count: 0,
+          first_shift_count: 0,
+          second_shift_count: 0,
+          night_shift_count: 0,
+          line_type: 'item',
+          is_applicable: true,
+          sort_order: sortOrder++,
+        })
+        createdList.push(created)
+      }
+
+      setShiftDeployments((prev) => [...prev, ...createdList])
+    } catch (e: unknown) {
+      setActionError(parseApiError(e, 'Failed to import mapped roles').message)
+    } finally {
+      setImportingMappedRoles(false)
     }
   }
 
@@ -1332,48 +1399,86 @@ export function SiteSurveyWorkspacePage() {
         {canUpdate ? (
           <div className="mt-4">
             {addDeploymentOpen ? (
-              <div className="rounded-lg border border-app-border bg-app-muted/30 p-4">
-                <p className="text-sm font-medium text-app-heading mb-3">Add Role to Deployment</p>
+              <div className="w-full rounded-lg border border-app-border bg-app-muted/30 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-app-heading">Add Role to Deployment</p>
+                  <span className="text-xs text-app-subtle">
+                    {jobRolesLoading ? 'Loading 650+ roles...' : `${filteredJobRoles.length} roles available`}
+                  </span>
+                </div>
+                
+                {/* Instant Search for 659+ roles */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-app-subtle" />
+                  <input
+                    type="text"
+                    placeholder="Search 650+ roles by name or code (e.g. Electrician, Guard, Driver, Housekeeper)..."
+                    value={roleSearchQuery}
+                    onChange={(e) => setRoleSearchQuery(e.target.value)}
+                    className="w-full rounded-lg border border-app-border bg-app-surface pl-9 pr-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                    autoFocus
+                  />
+                </div>
+
                 <div className="flex flex-col sm:flex-row gap-3">
                   <select
                     value={selectedJobRoleId}
                     onChange={(e) => setSelectedJobRoleId(e.target.value)}
                     disabled={jobRolesLoading}
+                    size={Math.min(6, Math.max(3, filteredJobRoles.length))}
                     className="flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                   >
-                    <option value="">{jobRolesLoading ? 'Loading roles...' : 'Select a job role...'}</option>
-                    {jobRoles.map((role) => (
-                      <option key={role.id} value={String(role.id)}>
-                        {role.name} ({role.code}) — {role.skill_category_display ?? role.skill_category}
-                      </option>
-                    ))}
+                    {filteredJobRoles.length === 0 ? (
+                      <option disabled value="">No roles match your search</option>
+                    ) : (
+                      filteredJobRoles.map((role) => (
+                        <option key={role.id} value={String(role.id)} className="py-1">
+                          {role.name} ({role.code}) — {role.skill_category_display ?? role.skill_category}
+                        </option>
+                      ))
+                    )}
                   </select>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setAddDeploymentOpen(false)
-                        setSelectedJobRoleId('')
-                      }}
-                      className="min-h-9 px-3 text-sm"
-                    >
-                      Cancel
-                    </Button>
+                  <div className="flex sm:flex-col justify-end gap-2">
                     <Button
                       onClick={() => {
                         const roleId = Number(selectedJobRoleId)
                         if (roleId) void handleAddDeploymentRole(roleId)
                       }}
                       disabled={!selectedJobRoleId}
-                      className="min-h-9 px-3 text-sm"
+                      className="min-h-9 px-4 text-sm whitespace-nowrap"
                     >
                       Add Role
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setAddDeploymentOpen(false)
+                        setSelectedJobRoleId('')
+                        setRoleSearchQuery('')
+                      }}
+                      className="min-h-9 px-3 text-sm"
+                    >
+                      Cancel
                     </Button>
                   </div>
                 </div>
               </div>
             ) : (
-              <AddRowButton onClick={() => setAddDeploymentOpen(true)} label="Add role" />
+              <div className="flex flex-wrap items-center gap-3">
+                <AddRowButton onClick={() => setAddDeploymentOpen(true)} label="Add role" />
+                {roleMappings.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void handleImportAllMappedRoles()}
+                    disabled={importingMappedRoles}
+                    className="min-h-9 text-xs flex items-center gap-1.5"
+                    title="Add all configured active role mappings into this survey"
+                  >
+                    {importingMappedRoles ? <Spinner className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                    {importingMappedRoles ? 'Adding Mapped Roles...' : 'Add All Mapped Roles'}
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         ) : null}

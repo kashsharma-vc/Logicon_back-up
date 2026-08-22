@@ -20,7 +20,8 @@ from decimal import Decimal, InvalidOperation
 
 def score_role(candidate, job_role, experiences) -> float:
     """
-    100 if candidate.current_role contains job_role.name (case-insensitive).
+    100 if candidate.target_job_role matches job_role
+        or candidate.current_role / target_job_role.name contains job_role.name (case-insensitive).
     70  if any experience job_title matches.
     30  no match (baseline — role signal may simply be absent).
     50  if job_role is None (neutral).
@@ -32,8 +33,15 @@ def score_role(candidate, job_role, experiences) -> float:
     if not role_name:
         return 50.0
 
+    if getattr(candidate, 'target_job_role_id', None) and candidate.target_job_role_id == job_role.id:
+        return 100.0
+
     current = (candidate.current_role or '').lower()
     if role_name in current or current in role_name:
+        return 100.0
+
+    target_name = (getattr(candidate.target_job_role, 'name', '') or '').lower() if getattr(candidate, 'target_job_role', None) else ''
+    if target_name and (role_name in target_name or target_name in role_name):
         return 100.0
 
     for exp in experiences:
