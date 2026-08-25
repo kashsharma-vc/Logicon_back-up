@@ -95,6 +95,74 @@ def _is_valid_role_name(name: str) -> bool:
     return True
 
 
+def _is_header_row(name: str, mobile: str, designation: str, row_dict: dict = None) -> bool:
+    """
+    Detect if a parsed row is actually a column header row that slipped through.
+    Prevents creating candidate records named 'Name', 'Candidate Name', 'Mobile', etc.
+    """
+    name_clean = (name or '').strip().lower()
+    mobile_clean = (mobile or '').strip().lower()
+    desig_clean = (designation or '').strip().lower()
+
+    HEADER_NAME_STRINGS = {
+        'name', 'candidate name', 'candidatename', 'full name', 'fullname',
+        'first name', 'firstname', 'last name', 'lastname', 'applicant name',
+        'applicant', 'candidate', 'employee name', 'emp name', 'emp_name',
+        'person name', 'applicant_name', 'candidate_name', 'name of candidate',
+        'name of the candidate', 'seeker name', 'user name', 'username',
+        'sr no', 'sr. no', 'sr_no', 's.no', 'sl no', 'sl. no', 'sl_no', 'id',
+    }
+
+    HEADER_PHONE_STRINGS = {
+        'phone', 'mobile', 'contact', 'mobile no', 'mobile_no', 'mobile number',
+        'phone no', 'phone_no', 'phone number', 'contact no', 'contact_no',
+        'contact number', 'ph no', 'ph_no', 'mob no', 'mob_no', 'mob', 'cell',
+        'tel', 'whatsapp', 'candidate mobile', 'candidate phone', 'calling number',
+        'primary mobile', 'primary phone', 'alternate phone', 'alt phone',
+        'alternate number', 'alt number', 'phone_normalized', 'mobile_normalized',
+    }
+
+    HEADER_DESIG_STRINGS = {
+        'designation', 'role', 'job role', 'job_role', 'current role', 'current_role',
+        'target role', 'target_role', 'position', 'job title', 'job_title',
+        'title', 'profile', 'work profile', 'work_profile', 'trade', 'post',
+        'mapped role', 'mapped_role', 'function', 'department',
+    }
+
+    digits = ''.join(filter(str.isdigit, mobile_clean))
+
+    # 1. If name is a header string and mobile is not a real 8+ digit phone number
+    if name_clean in HEADER_NAME_STRINGS and len(digits) < 8:
+        return True
+
+    # 2. If mobile is a phone header string
+    if mobile_clean in HEADER_PHONE_STRINGS:
+        return True
+
+    # 3. If mobile text contains header words and no valid digits
+    if len(digits) < 7 and any(w in mobile_clean for w in ('phone', 'mobile', 'contact', 'cell', 'tel', 'call', 'whats', 'number')):
+        return True
+
+    # 4. If name and designation are both header strings
+    if desig_clean in HEADER_DESIG_STRINGS and (name_clean in HEADER_NAME_STRINGS or len(digits) < 7):
+        return True
+
+    # 5. If row_dict is provided, check if multiple cells contain header keywords
+    if row_dict:
+        vals = [str(v).strip().lower() for k, v in row_dict.items() if k != '_source_row_number' and v not in (None, '')]
+        if vals:
+            header_hits = sum(
+                1 for v in vals
+                if v in HEADER_NAME_STRINGS or v in HEADER_PHONE_STRINGS or v in HEADER_DESIG_STRINGS
+                or v in {'email', 'location', 'city', 'experience', 'exp', 'company', 'skills', 'salary', 'ctc', 'gender', 'dob', 'address'}
+            )
+            has_10_digit = any(re.search(r'\b[6-9]\d{9}\b', v) for v in vals)
+            if header_hits >= 2 and not has_10_digit:
+                return True
+
+    return False
+
+
 class BulkExcelResumeGenerateView(APIView):
 
     permission_classes = [IsAuthenticated]
@@ -183,7 +251,8 @@ class BulkExcelResumeGenerateView(APIView):
             file_obj.seek(0)
             sheet_rows = _read_candidate_sheet(file_obj)
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Error reading candidate sheet via _read_candidate_sheet: %s", exc)
             sheet_rows = []
 
         # ------------------------------------------------------------
@@ -248,6 +317,10 @@ class BulkExcelResumeGenerateView(APIView):
                 company = _clean_val(_value(row, 'current_company', 'company', 'organization', 'employer', 'org', 'current_org', 'prev_company', 'firm'))
                 skills_raw = _clean_val(_value(row, 'skills', 'skill', 'key_skills', 'technical_skills', 'skills_list', 'specialization', 'technologies'))
 
+                # Skip header row if it slipped into data
+                if _is_header_row(name, mobile, designation, row):
+                    continue
+
                 # --------------------------------------------------------
                 # Smart Content-Type Auto-Detection across all cell values
                 # (Handles scrambled / misaligned columns gracefully)
@@ -290,6 +363,10 @@ class BulkExcelResumeGenerateView(APIView):
                             if _is_valid_role_name(val) and len(val) >= 3 and not re.search(r'\b[6-9]\d{9}\b', val):
                                 designation = val
                                 break
+
+                # Final check after auto-detection: skip if still a header row
+                if _is_header_row(name, mobile, designation, row):
+                    continue
 
                 # Completely empty candidate row
                 if not mobile and not name and not email:
@@ -343,6 +420,7 @@ class BulkExcelResumeGenerateView(APIView):
         if not parsed_rows:
 
             try:
+                from .services import _find_candidate_import_header_row, _norm_header, _value
 
                 file_obj.seek(0)
 
@@ -353,93 +431,85 @@ class BulkExcelResumeGenerateView(APIView):
                 )
 
                 for sheet in wb.worksheets:
+                    sheet_rows_raw = list(sheet.iter_rows(values_only=True))
+                    if not sheet_rows_raw:
+                        continue
 
-                    for idx, row in enumerate(
-                        sheet.iter_rows(
-                            values_only=True
-                        ),
-                        start=1,
-                    ):
+                    header_idx = _find_candidate_import_header_row(sheet_rows_raw)
+                    if header_idx is not None:
+                        headers = [_norm_header(h) for h in sheet_rows_raw[header_idx]]
+                        for sub_idx, values in enumerate(sheet_rows_raw[header_idx + 1:], start=header_idx + 2):
+                            if not values or not any(values):
+                                continue
+                            row_dict = {
+                                headers[i]: (str(values[i]).strip() if values[i] is not None else '')
+                                for i in range(min(len(headers), len(values)))
+                                if headers[i]
+                            }
+                            row_name = _clean_val(_value(row_dict, 'name', 'candidate_name', 'full_name', 'applicant_name'))
+                            row_mobile = _clean_val(_value(row_dict, 'mobile', 'phone', 'contact', 'mobile_no', 'phone_number'))
+                            row_desig = _clean_val(_value(row_dict, 'designation', 'role', 'job_role', 'current_role'))
 
-                        if not row or not any(row):
-                            continue
+                            if _is_header_row(row_name, row_mobile, row_desig, row_dict):
+                                continue
 
-                        cell0 = (
-                            _clean_val(row[0])
-                            if len(row) > 0 and row[0]
-                            else ""
-                        )
+                            if not row_name and not row_mobile:
+                                continue
 
-                        cell1 = (
-                            _clean_val(row[1])
-                            if len(row) > 1 and row[1]
-                            else ""
-                        )
+                            row_phone_norm = _safe_phone_norm(row_mobile, sub_idx)
+                            row_name_final = row_name or f"Candidate {row_phone_norm[-4:]}"
+                            row_desig_final = row_desig if row_desig and _is_valid_role_name(row_desig) else "General Candidate"
 
-                        cell2 = (
-                            _clean_val(row[2])
-                            if len(row) > 2 and row[2]
-                            else ""
-                        )
+                            parsed_rows.append({
+                                'name': row_name_final,
+                                'first_name': '',
+                                'last_name': '',
+                                'mobile': row_phone_norm,
+                                'alt_mobile': None,
+                                'phone_norm': row_phone_norm,
+                                'designation': row_desig_final,
+                                'email': _clean_val(_value(row_dict, 'email', 'email_address')),
+                                'location': _clean_val(_value(row_dict, 'location', 'city')),
+                                'experience_raw': _value(row_dict, 'experience', 'total_experience'),
+                                'company': _clean_val(_value(row_dict, 'company', 'organization')),
+                                'skills_raw': _clean_val(_value(row_dict, 'skills', 'skill')),
+                            })
+                            designation_names.add(row_desig_final)
+                            mobiles.add(row_phone_norm)
+                    else:
+                        for idx, row in enumerate(sheet_rows_raw, start=1):
+                            if not row or not any(row):
+                                continue
 
-                        # Header row
-                        if (
-                            idx == 1
-                            and (
-                                'name' in cell0.lower()
-                                or 'mobile' in cell1.lower()
-                                or 'phone' in cell1.lower()
-                                or 'role' in cell2.lower()
-                            )
-                        ):
-                            continue
+                            cell0 = _clean_val(row[0]) if len(row) > 0 and row[0] else ""
+                            cell1 = _clean_val(row[1]) if len(row) > 1 and row[1] else ""
+                            cell2 = _clean_val(row[2]) if len(row) > 2 and row[2] else ""
 
-                        if not cell0 and not cell1:
-                            continue
+                            if _is_header_row(cell0, cell1, cell2):
+                                continue
 
-                        mobile = (
-                            cell1
-                            or f"99{idx:08d}"
-                        )
+                            if not cell0 and not cell1:
+                                continue
 
-                        phone_norm = (
-                            _safe_phone_norm(
-                                mobile,
-                                idx,
-                            )
-                        )
+                            mobile = cell1 or f"99{idx:08d}"
+                            phone_norm = _safe_phone_norm(mobile, idx)
+                            name = cell0 or f"Candidate {phone_norm[-4:]}"
+                            designation = cell2 if cell2 and _is_valid_role_name(cell2) else "General Candidate"
 
-                        name = (
-                            cell0
-                            or f"Candidate {phone_norm[-4:]}"
-                        )
-
-                        designation = (
-                            cell2
-                            if cell2 and _is_valid_role_name(cell2)
-                            else "General Candidate"
-                        )
-
-                        parsed_rows.append(
-                            {
+                            parsed_rows.append({
                                 'name': name,
+                                'first_name': '',
+                                'last_name': '',
                                 'mobile': phone_norm,
                                 'alt_mobile': None,
                                 'phone_norm': phone_norm,
                                 'designation': designation,
-                            }
-                        )
+                            })
+                            designation_names.add(designation)
+                            mobiles.add(phone_norm)
 
-                        designation_names.add(
-                            designation
-                        )
-
-                        mobiles.add(
-                            phone_norm
-                        )
-
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Fallback openpyxl parser failed: %s", e)
 
         # ------------------------------------------------------------
         # No usable rows

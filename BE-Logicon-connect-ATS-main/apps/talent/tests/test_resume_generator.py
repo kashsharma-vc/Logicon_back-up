@@ -195,9 +195,71 @@ class TestResumeGenerator(TestCase):
         self.assertEqual(resume.status, 'indexed')
         self.assertGreater(resume.size_bytes, 1000)
 
-    def test_bulk_excel_resume_generate_view_no_file(self):
+    def test_bulk_excel_resume_generate_no_file(self):
         self.api_client.force_authenticate(user=self.user)
         response = self.api_client.post('/api/talent/resumes/bulk-generate/', {}, format='multipart')
         self.assertEqual(response.status_code, 400)
         self.assertIn('No file provided', response.data['error'])
+
+    def test_bulk_excel_resume_generate_skips_header_row_csv(self):
+        self.api_client.force_authenticate(user=self.user)
+        # CSV with column headers
+        csv_content = (
+            b"Candidate Name,Mobile Number,Designation,Email ID\n"
+            b"Candidate Name,Mobile Number,Designation,Email ID\n"  # repeated header row
+            b"Manish Verma,9812345671,Civil Engineer,manish@example.com\n"
+        )
+        file = SimpleUploadedFile("candidates_with_headers.csv", csv_content, content_type="text/csv")
+        response = self.api_client.post('/api/talent/resumes/bulk-generate/', {'file': file}, format='multipart')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['new_candidates'], 1)
+
+        # Ensure NO candidate with name "Candidate Name" or phone "Mobile Number" was created
+        self.assertFalse(Candidate.objects.filter(first_name='Candidate', last_name='Name').exists())
+        self.assertFalse(Candidate.objects.filter(first_name='Name').exists())
+
+        # Ensure real candidate was created
+        cand = Candidate.objects.filter(phone_normalized='9812345671').first()
+        self.assertIsNotNone(cand)
+        self.assertEqual(cand.first_name, 'Manish')
+        self.assertEqual(cand.last_name, 'Verma')
+
+    def test_bulk_excel_resume_generate_xlsx_with_title_and_headers(self):
+        import openpyxl
+        self.api_client.force_authenticate(user=self.user)
+
+        # Create in-memory XLSX with a title banner row on row 1, headers on row 2, data on row 3
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Candidates"
+        ws.append(["Logicon ATS Candidates Export 2026 - Confidential", "", "", ""])  # Title row
+        ws.append(["Candidate Name", "Mobile No.", "Current Designation", "Location"])  # Header row
+        ws.append(["Pooja Hegde", "9871122334", "Marketing Lead", "Mumbai"])  # Data row 1
+        ws.append(["Rohan Deshmukh", "9871122335", "Field Engineer", "Pune"])  # Data row 2
+
+        bio = BytesIO()
+        wb.save(bio)
+        bio.seek(0)
+
+        file = SimpleUploadedFile("candidates_export.xlsx", bio.read(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response = self.api_client.post('/api/talent/resumes/bulk-generate/', {'file': file}, format='multipart')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['rows_processed'], 2)
+        self.assertEqual(response.data['new_candidates'], 2)
+
+        # Verify no header/banner candidate created
+        self.assertFalse(Candidate.objects.filter(first_name__icontains='Export').exists())
+        self.assertFalse(Candidate.objects.filter(first_name='Candidate', last_name='Name').exists())
+
+        # Verify real candidates created
+        cand1 = Candidate.objects.filter(phone_normalized='9871122334').first()
+        self.assertIsNotNone(cand1)
+        self.assertEqual(cand1.first_name, 'Pooja')
+        self.assertEqual(cand1.last_name, 'Hegde')
+
+        cand2 = Candidate.objects.filter(phone_normalized='9871122335').first()
+        self.assertIsNotNone(cand2)
+        self.assertEqual(cand2.first_name, 'Rohan')
+        self.assertEqual(cand2.last_name, 'Deshmukh')
+
 

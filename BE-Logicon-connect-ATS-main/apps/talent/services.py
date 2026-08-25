@@ -663,21 +663,65 @@ def _stream_candidate_sheet(uploaded_file):
     """Memory-efficient streaming generator for CSV and XLSX files."""
     filename = (getattr(uploaded_file, 'name', '') or '').lower()
     uploaded_file.seek(0)
+    raw = uploaded_file.read()
+    uploaded_file.seek(0)
 
-    if filename.endswith('.csv'):
-        content = uploaded_file.read()
-        if isinstance(content, bytes):
-            text = content.decode('utf-8-sig', errors='replace')
-        else:
-            text = content
-        reader = csv.DictReader(StringIO(text))
-        for index, row in enumerate(reader, start=2):
-            normalized = {(_norm_header(k)): (v or '').strip() for k, v in row.items()}
-            normalized['_source_row_number'] = index
-            yield normalized
-        return
+    is_xlsx = filename.endswith('.xlsx') or raw.startswith(b'PK\x03\x04')
 
-    if filename.endswith('.xlsx'):
+    if not is_xlsx:
+        try:
+            if isinstance(raw, bytes):
+                text = raw.decode('utf-8-sig', errors='replace')
+            else:
+                text = raw
+
+            sample = text[:4096]
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=',;\t|')
+                delimiter = dialect.delimiter
+            except Exception:
+                delimiter = ','
+
+            reader = list(csv.reader(StringIO(text), delimiter=delimiter))
+            if reader:
+                header_index = _find_candidate_import_header_row(reader)
+                if header_index is not None:
+                    headers = [_norm_header(h) for h in reader[header_index]]
+                    for source_row_number, values in enumerate(reader[header_index + 1:], start=header_index + 2):
+                        if not values or not any(values):
+                            continue
+                        if _is_header_row_values(values):
+                            continue
+                        row = {}
+                        for idx, header in enumerate(headers):
+                            if not header:
+                                continue
+                            value = values[idx] if idx < len(values) else ''
+                            row[header] = '' if value is None else str(value).strip()
+                        if any(row.values()):
+                            row['_source_row_number'] = source_row_number
+                            yield row
+                    return
+                else:
+                    for source_row_number, values in enumerate(reader, start=1):
+                        if not values or not any(values):
+                            continue
+                        if _is_header_row_values(values):
+                            continue
+                        r_str = [str(v).strip() if v is not None else '' for v in values]
+                        row = {
+                            'name': r_str[0] if len(r_str) > 0 else '',
+                            'phone': r_str[1] if len(r_str) > 1 else '',
+                            'role': r_str[2] if len(r_str) > 2 else '',
+                            '_source_row_number': source_row_number,
+                        }
+                        if row['name'] or row['phone']:
+                            yield row
+                    return
+        except Exception:
+            pass
+
+    if is_xlsx or filename.endswith('.xlsx'):
         try:
             from openpyxl import load_workbook
         except ImportError:
@@ -686,7 +730,7 @@ def _stream_candidate_sheet(uploaded_file):
             })
 
         uploaded_file.seek(0)
-        workbook = load_workbook(uploaded_file, read_only=True, data_only=True)
+        workbook = load_workbook(BytesIO(raw), read_only=True, data_only=True)
         for sheet in workbook.worksheets:
             row_iterator = sheet.iter_rows(values_only=True)
             first_rows = []
@@ -706,6 +750,8 @@ def _stream_candidate_sheet(uploaded_file):
                 for source_row_number, values in enumerate(all_rows, start=1):
                     if not values or not any(values):
                         continue
+                    if _is_header_row_values(values):
+                        continue
                     r_str = [str(v).strip() if v is not None else '' for v in values]
                     row = {
                         'name': r_str[0] if len(r_str) > 0 else '',
@@ -720,6 +766,8 @@ def _stream_candidate_sheet(uploaded_file):
                     source_row_number += 1
                     if not values or not any(values):
                         continue
+                    if _is_header_row_values(values):
+                        continue
                     r_str = [str(v).strip() if v is not None else '' for v in values]
                     row = {
                         'name': r_str[0] if len(r_str) > 0 else '',
@@ -733,6 +781,10 @@ def _stream_candidate_sheet(uploaded_file):
 
             headers = [_norm_header(h) for h in first_rows[header_index]]
             for sub_idx, values in enumerate(first_rows[header_index + 1:], start=header_index + 2):
+                if not values or not any(values):
+                    continue
+                if _is_header_row_values(values):
+                    continue
                 row = {}
                 for idx, header in enumerate(headers):
                     if not header:
@@ -746,6 +798,10 @@ def _stream_candidate_sheet(uploaded_file):
             current_row_number = len(first_rows)
             for values in row_iterator:
                 current_row_number += 1
+                if not values or not any(values):
+                    continue
+                if _is_header_row_values(values):
+                    continue
                 row = {}
                 for idx, header in enumerate(headers):
                     if not header:
@@ -1416,22 +1472,162 @@ def candidate_journey_status(candidate) -> dict:
     return _journey_payload(status='available')
 
 
+def _is_phone_header(h: str) -> bool:
+    h = _norm_header(h)
+    if not h:
+        return False
+    if h in {
+        'phone', 'mobile', 'contact', 'mobile_no', 'mobile_num', 'mobile_number',
+        'phone_no', 'phone_num', 'phone_number', 'contact_no', 'contact_num', 'contact_number',
+        'ph_no', 'ph_num', 'mob_no', 'mob', 'cell', 'tel', 'whatsapp', 'candidate_mobile',
+        'candidate_phone', 'candidate_contact', 'calling_number', 'primary_mobile',
+        'primary_phone', 'primary_contact', 'user_phone', 'applicant_phone',
+        'applicant_mobile', 'alternate_phone', 'alt_phone', 'alternate_number',
+        'alt_number', 'secondary_phone', 'alt_contact', 'alternate_contact',
+        'alternate_mobile', 'alt_mob', 'other_number', 'emergency_contact',
+        'phone_normalized', 'mobile_normalized',
+    }:
+        return True
+    if any(k in h for k in ('phone', 'mobile', 'contact_no', 'mob_no', 'calling_no')):
+        return True
+    return False
+
+
+def _is_name_header(h: str) -> bool:
+    h = _norm_header(h)
+    if not h:
+        return False
+    if h in {
+        'name', 'full_name', 'candidate_name', 'first_name', 'firstname', 'last_name',
+        'lastname', 'middle_name', 'name_of_candidate', 'name_of_the_candidate',
+        'applicant_name', 'applicant', 'candidate', 'employee_name', 'emp_name',
+        'person_name', 'user_name', 'member_name', 'seeker_name',
+    }:
+        return True
+    if ('name' in h or 'candidate' in h or 'applicant' in h) and not any(k in h for k in ('company', 'org', 'college', 'institute', 'file', 'skill', 'role', 'job', 'designation')):
+        return True
+    return False
+
+
+def _is_profile_header(h: str) -> bool:
+    h = _norm_header(h)
+    if not h:
+        return False
+    if h in {
+        'email', 'email_id', 'e_mail', 'mail', 'mail_id', 'email_address', 'candidate_email',
+        'designation', 'current_designation', 'target_designation', 'role', 'job_role',
+        'target_job_role', 'current_role', 'target_role', 'position', 'applied_position',
+        'post', 'trade', 'job_title', 'title', 'profile', 'work_profile', 'mapped_role',
+        'current_location', 'location', 'city', 'current_city', 'work_location', 'job_location', 'place', 'address',
+        'total_experience_years', 'experience_years', 'experience', 'total_experience',
+        'total_exp', 'exp', 'work_experience', 'work_exp', 'yrs_of_exp', 'years_of_experience',
+        'skills', 'skill', 'key_skills', 'technical_skills', 'skills_list', 'specialization', 'technologies',
+        'company', 'current_company', 'organization', 'employer', 'org', 'current_org', 'prev_company',
+        'collar_type', 'billing_type', 'ctc', 'current_ctc', 'expected_ctc', 'salary',
+    }:
+        return True
+    return False
+
+
+def _is_header_row_values(values) -> bool:
+    """Check if a row of values is actually a header row rather than candidate data."""
+    if not values or not any(values):
+        return False
+    clean_vals = [_norm_header(v) for v in values if _norm_header(v)]
+    if not clean_vals:
+        return False
+    phone_hits = sum(1 for v in clean_vals if _is_phone_header(v))
+    name_hits = sum(1 for v in clean_vals if _is_name_header(v))
+    profile_hits = sum(1 for v in clean_vals if _is_profile_header(v))
+
+    if (phone_hits and name_hits) or (name_hits and profile_hits) or (phone_hits and profile_hits):
+        return True
+    if (phone_hits + name_hits + profile_hits) >= 2:
+        return True
+    if len(clean_vals) >= 2:
+        if (_is_name_header(clean_vals[0]) or _is_phone_header(clean_vals[0])) and (_is_phone_header(clean_vals[1]) or _is_profile_header(clean_vals[1])):
+            return True
+    return False
+
+
+def _norm_header(value) -> str:
+    return re.sub(r'[^a-z0-9]+', '_', str(value or '').strip().lower()).strip('_')
+
+
+def _find_candidate_import_header_row(rows) -> int | None:
+    """
+    Locate the actual candidate header row in an XLSX/CSV sheet.
+
+    Business users often add a title row above the table.  The importer needs to
+    tolerate that and start at the row containing phone/name columns.
+    """
+    for idx, values in enumerate(rows[:25]):
+        if _is_header_row_values(values):
+            return idx
+    return None
+
+
 def _read_candidate_sheet(uploaded_file) -> list[dict]:
     filename = (getattr(uploaded_file, 'name', '') or '').lower()
     uploaded_file.seek(0)
     raw = uploaded_file.read()
     uploaded_file.seek(0)
 
-    if filename.endswith('.csv'):
-        text = raw.decode('utf-8-sig', errors='replace')
-        output = []
-        for index, row in enumerate(csv.DictReader(StringIO(text)), start=2):
-            normalized = {(_norm_header(k)): (v or '').strip() for k, v in row.items()}
-            normalized['_source_row_number'] = index
-            output.append(normalized)
-        return output
+    # Check for CSV format
+    is_xlsx = filename.endswith('.xlsx') or raw.startswith(b'PK\x03\x04')
+    if not is_xlsx:
+        try:
+            text = raw.decode('utf-8-sig', errors='replace')
+            csv_lines = [line for line in text.splitlines() if line.strip()]
+            if csv_lines:
+                sample = text[:4096]
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=',;\t|')
+                    delimiter = dialect.delimiter
+                except Exception:
+                    delimiter = ','
 
-    if filename.endswith('.xlsx'):
+                reader = list(csv.reader(StringIO(text), delimiter=delimiter))
+                if reader:
+                    header_index = _find_candidate_import_header_row(reader)
+                    output = []
+                    if header_index is not None:
+                        headers = [_norm_header(h) for h in reader[header_index]]
+                        for source_row_number, values in enumerate(reader[header_index + 1:], start=header_index + 2):
+                            if not values or not any(values):
+                                continue
+                            if _is_header_row_values(values):
+                                continue
+                            row = {}
+                            for idx, header in enumerate(headers):
+                                if not header:
+                                    continue
+                                value = values[idx] if idx < len(values) else ''
+                                row[header] = '' if value is None else str(value).strip()
+                            if any(row.values()):
+                                row['_source_row_number'] = source_row_number
+                                output.append(row)
+                        return output
+                    else:
+                        for source_row_number, values in enumerate(reader, start=1):
+                            if not values or not any(values):
+                                continue
+                            if _is_header_row_values(values):
+                                continue
+                            r_str = [str(v).strip() if v is not None else '' for v in values]
+                            row = {
+                                'name': r_str[0] if len(r_str) > 0 else '',
+                                'phone': r_str[1] if len(r_str) > 1 else '',
+                                'role': r_str[2] if len(r_str) > 2 else '',
+                                '_source_row_number': source_row_number,
+                            }
+                            if row['name'] or row['phone']:
+                                output.append(row)
+                        return output
+        except Exception:
+            pass
+
+    if is_xlsx or filename.endswith('.xlsx'):
         try:
             from openpyxl import load_workbook
         except ImportError:
@@ -1451,6 +1647,8 @@ def _read_candidate_sheet(uploaded_file) -> list[dict]:
                 for source_row_number, values in enumerate(rows, start=1):
                     if not values or not any(values):
                         continue
+                    if _is_header_row_values(values):
+                        continue
                     r_str = [str(v).strip() if v is not None else '' for v in values]
                     row = {
                         'name': r_str[0] if len(r_str) > 0 else '',
@@ -1464,6 +1662,10 @@ def _read_candidate_sheet(uploaded_file) -> list[dict]:
 
             headers = [_norm_header(h) for h in rows[header_index]]
             for source_row_number, values in enumerate(rows[header_index + 1:], start=header_index + 2):
+                if not values or not any(values):
+                    continue
+                if _is_header_row_values(values):
+                    continue
                 row = {}
                 for idx, header in enumerate(headers):
                     if not header:
@@ -1476,40 +1678,6 @@ def _read_candidate_sheet(uploaded_file) -> list[dict]:
         return output
 
     raise ValidationError({'file': 'Upload a .csv or .xlsx file.'})
-
-
-def _norm_header(value) -> str:
-    return re.sub(r'[^a-z0-9]+', '_', str(value or '').strip().lower()).strip('_')
-
-
-def _find_candidate_import_header_row(rows) -> int | None:
-    """
-    Locate the actual candidate header row in an XLSX sheet.
-
-    Business users often add a title row above the table.  The importer needs to
-    tolerate that and start at the row containing phone/name columns.
-    """
-    phone_headers = {
-        'phone', 'mobile', 'contact', 'mobile_number', 'phone_number', 'contact_number',
-        'alternate_phone', 'alt_phone', 'alternate_number', 'alt_number', 'secondary_phone',
-        'alt_contact', 'alternate_contact', 'alternate_mobile',
-    }
-    name_headers = {'first_name', 'firstname', 'last_name', 'lastname', 'full_name', 'name'}
-    profile_headers = {
-        'email', 'current_role', 'role', 'job_role', 'current_location', 'location',
-        'total_experience_years', 'experience_years', 'experience', 'skills',
-    }
-
-    for idx, values in enumerate(rows[:20]):
-        headers = {_norm_header(value) for value in values if _norm_header(value)}
-        if not headers:
-            continue
-        has_phone = bool(headers & phone_headers)
-        has_name = bool(headers & name_headers)
-        has_profile = bool(headers & profile_headers)
-        if has_phone and (has_name or has_profile):
-            return idx
-    return None
 
 
 def _value(row: dict, *keys: str) -> str:
