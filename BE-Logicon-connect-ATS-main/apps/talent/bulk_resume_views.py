@@ -1,3 +1,5 @@
+import logging
+import re
 import openpyxl
 
 from rest_framework.views import APIView
@@ -10,6 +12,8 @@ from apps.jobs.models import JobRole
 from apps.talent.models import Candidate
 from apps.talent.services import normalize_phone
 from apps.talent.tasks import generate_bulk_candidate_resumes_task
+
+logger = logging.getLogger(__name__)
 
 
 def _clean_val(val) -> str:
@@ -762,11 +766,21 @@ class BulkExcelResumeGenerateView(APIView):
                 start + RESUME_CHUNK_SIZE
             ]
 
-            generate_bulk_candidate_resumes_task.delay(
-                chunk_ids
-            )
-
-            queued_chunks += 1
+            try:
+                generate_bulk_candidate_resumes_task.delay(
+                    chunk_ids
+                )
+                queued_chunks += 1
+            except Exception as exc:
+                logger.warning(
+                    "Celery dispatch failed (%s), running resume generation synchronously.",
+                    exc,
+                )
+                try:
+                    generate_bulk_candidate_resumes_task.apply(args=[chunk_ids])
+                    queued_chunks += 1
+                except Exception as inner_exc:
+                    logger.exception("Synchronous resume generation failed: %s", inner_exc)
 
         # ------------------------------------------------------------
         # 10. Return immediately
