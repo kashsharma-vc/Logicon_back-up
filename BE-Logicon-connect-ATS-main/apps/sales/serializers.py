@@ -86,16 +86,28 @@ class SiteSurveySerializer(serializers.ModelSerializer):
         ]
 
     def get_lead_client_name(self, obj):
-        return obj.lead.client_name if obj.lead_id else None
+        try:
+            return obj.lead.client_name if obj.lead_id and obj.lead else None
+        except Exception:
+            return None
 
     def get_site_name(self, obj):
-        return obj.site.site_name if obj.site_id else None
+        try:
+            return obj.site.site_name if obj.site_id and obj.site else None
+        except Exception:
+            return None
 
     def get_survey_done_by_name(self, obj):
-        return obj.survey_done_by.username if obj.survey_done_by_id else None
+        try:
+            return obj.survey_done_by.username if obj.survey_done_by_id and obj.survey_done_by else None
+        except Exception:
+            return None
 
     def get_assigned_to_name(self, obj):
-        return obj.assigned_to.username if obj.assigned_to_id else None
+        try:
+            return obj.assigned_to.username if obj.assigned_to_id and obj.assigned_to else None
+        except Exception:
+            return None
 
 
 class SiteSurveyWriteSerializer(serializers.ModelSerializer):
@@ -594,8 +606,20 @@ class SiteSurveyScopeAnswerSerializer(serializers.ModelSerializer):
 
 class SiteSurveyShiftDeploymentSerializer(serializers.ModelSerializer):
     description = serializers.CharField(required=False, allow_blank=True)
-    job_role_name = serializers.CharField(source='job_role.name', read_only=True)
-    job_role_code = serializers.CharField(source='job_role.code', read_only=True)
+    job_role_name = serializers.SerializerMethodField()
+    job_role_code = serializers.SerializerMethodField()
+
+    def get_job_role_name(self, obj):
+        try:
+            return obj.job_role.name if obj.job_role_id and obj.job_role else None
+        except Exception:
+            return None
+
+    def get_job_role_code(self, obj):
+        try:
+            return obj.job_role.code if obj.job_role_id and obj.job_role else None
+        except Exception:
+            return None
 
     class Meta:
         model = SiteSurveyShiftDeployment

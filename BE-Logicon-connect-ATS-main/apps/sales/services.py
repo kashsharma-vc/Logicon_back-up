@@ -1403,18 +1403,20 @@ def seed_default_survey_lines(survey, overwrite=False):
         for sort_order, (field_key, field_label) in enumerate(fields, start=1):
             val = ''
             if category == 'client_scope_site':
-                if field_key == 'site_name':
-                    val = survey.site.site_name or ''
-                elif field_key == 'company_name':
-                    val = survey.lead.client_name or ''
-                elif field_key == 'address':
-                    val = survey.site.site_address or ''
-                elif field_key == 'contact_person_at_site':
-                    val = survey.lead.client_contact_person or ''
-                elif field_key == 'contact_phone_fax_mobile':
-                    val = survey.lead.client_phone or ''
-                elif field_key == 'ops_maintenance_in_scope':
-                    val = survey.lead.requirement_details or ''
+                lead = getattr(survey, 'lead', None)
+                site = getattr(survey, 'site', None)
+                if field_key == 'site_name' and site:
+                    val = getattr(site, 'site_name', '') or ''
+                elif field_key == 'company_name' and lead:
+                    val = getattr(lead, 'client_name', '') or ''
+                elif field_key == 'address' and site:
+                    val = getattr(site, 'site_address', '') or ''
+                elif field_key == 'contact_person_at_site' and lead:
+                    val = getattr(lead, 'client_contact_person', '') or ''
+                elif field_key == 'contact_phone_fax_mobile' and lead:
+                    val = getattr(lead, 'client_phone', '') or ''
+                elif field_key == 'ops_maintenance_in_scope' and lead:
+                    val = getattr(lead, 'requirement_details', '') or ''
 
             expected = {
                 'field_label': field_label,
