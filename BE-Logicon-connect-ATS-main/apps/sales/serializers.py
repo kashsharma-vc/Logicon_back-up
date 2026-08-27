@@ -626,7 +626,9 @@ class SiteSurveyShiftDeploymentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'survey', 'job_role', 'job_role_name', 'job_role_code', 'description',
             'general_count', 'first_shift_count', 'second_shift_count',
-            'night_shift_count', 'total_count',
+            'night_shift_count', 'reliever_count', 'total_count',
+            'shift_hours', 'working_days', 'base_wage', 'base_wage_source',
+            'base_wage_overridden', 'base_wage_override_reason', 'monthly_amount',
             'remarks', 'is_applicable', 'not_applicable_reason',
             'line_type', 'sort_order',
             'created_at', 'updated_at',
@@ -689,6 +691,7 @@ class SiteSurveyShiftDeploymentSerializer(serializers.ModelSerializer):
             + count_for('first_shift_count')
             + count_for('second_shift_count')
             + count_for('night_shift_count')
+            + count_for('reliever_count')
         )
         return attrs
 
