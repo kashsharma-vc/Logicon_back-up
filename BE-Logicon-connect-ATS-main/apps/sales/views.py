@@ -85,7 +85,7 @@ class SalesLeadViewSet(ScopedModelViewSet):
         'partial_update': 'sales_lead.update',
         'destroy':        'sales_lead.delete',
         'submit_to_operations': 'sales_lead.update',
-        'eligible_operations_owners': 'sales_lead.update',
+        'eligible_operations_owners': 'sales_lead.read',
         'generate_proposal':    'sales_proposal.create',
         'mark_survey_started':  'sales_survey.update',
         'mark_survey_completed': 'sales_survey.update',
