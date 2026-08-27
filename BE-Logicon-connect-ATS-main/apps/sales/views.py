@@ -124,6 +124,9 @@ class SalesLeadViewSet(ScopedModelViewSet):
         from apps.sales.services import submit_to_operations, validate_operations_survey_owner
         lead = self.get_object()
         operations_owner_id = request.data.get('operations_owner')
+        if isinstance(operations_owner_id, dict):
+            operations_owner_id = operations_owner_id.get('id')
+
         operations_owner = None
         if operations_owner_id:
             from apps.accounts.models import User as UserModel
@@ -134,6 +137,11 @@ class SalesLeadViewSet(ScopedModelViewSet):
                     {'detail': 'operations_owner not found in this org.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            except Exception as exc:
+                return Response(
+                    {'detail': f'Invalid operations_owner: {exc}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             try:
                 validate_operations_survey_owner(lead.org, operations_owner)
             except ValueError as exc:
@@ -142,6 +150,11 @@ class SalesLeadViewSet(ScopedModelViewSet):
             submit_to_operations(lead, request.user, operations_owner=operations_owner)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("submit_to_operations failed for lead %s: %s", lead.pk, exc)
+            return Response({'detail': f"Failed to submit lead to operations: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
         out = SalesLeadSerializer(lead, context={'request': request})
         return Response(out.data)
 

@@ -1423,11 +1423,14 @@ def seed_default_survey_lines(survey, overwrite=False):
                 'sort_order': sort_order,
                 'value_text': val
             }
-            obj, was_created = SiteSurveyScopeAnswer.objects.get_or_create(
+            obj = SiteSurveyScopeAnswer.objects.filter(
                 survey=survey, category=category, field_key=field_key,
-                defaults=expected,
-            )
-            if was_created:
+            ).first()
+            if not obj:
+                obj = SiteSurveyScopeAnswer.objects.create(
+                    survey=survey, category=category, field_key=field_key,
+                    **expected,
+                )
                 scope_created += 1
             else:
                 updated = False
@@ -1451,10 +1454,13 @@ def seed_default_survey_lines(survey, overwrite=False):
     sd_created = sd_updated = sd_existing = 0
     for sort_order, (description, line_type) in enumerate(SHIFT_DEPLOYMENT_ROWS, start=1):
         expected = {'line_type': line_type, 'sort_order': sort_order}
-        obj, was_created = SiteSurveyShiftDeployment.objects.get_or_create(
-            survey=survey, description=description, defaults=expected,
-        )
-        if was_created:
+        obj = SiteSurveyShiftDeployment.objects.filter(
+            survey=survey, description=description,
+        ).first()
+        if not obj:
+            obj = SiteSurveyShiftDeployment.objects.create(
+                survey=survey, description=description, **expected,
+            )
             sd_created += 1
         elif overwrite and _refresh_template_fields(
             obj, expected, _SHIFT_TEMPLATE_FIELDS,
@@ -1471,10 +1477,13 @@ def seed_default_survey_lines(survey, overwrite=False):
     loc_created = loc_updated = loc_existing = 0
     for sort_order, (location_name, line_type) in enumerate(LOCATION_ROWS, start=1):
         expected = {'line_type': line_type, 'sort_order': sort_order}
-        obj, was_created = SiteSurveyLocationLine.objects.get_or_create(
-            survey=survey, location_name=location_name, defaults=expected,
-        )
-        if was_created:
+        obj = SiteSurveyLocationLine.objects.filter(
+            survey=survey, location_name=location_name,
+        ).first()
+        if not obj:
+            obj = SiteSurveyLocationLine.objects.create(
+                survey=survey, location_name=location_name, **expected,
+            )
             loc_created += 1
         elif overwrite and _refresh_template_fields(
             obj, expected, _LOCATION_TEMPLATE_FIELDS,
@@ -1496,11 +1505,14 @@ def seed_default_survey_lines(survey, overwrite=False):
                 'amortisation_months': amort_months,
                 'sort_order': sort_order,
             }
-            obj, was_created = SiteSurveyEquipmentLine.objects.get_or_create(
+            obj = SiteSurveyEquipmentLine.objects.filter(
                 survey=survey, equipment_category=category, description=description,
-                defaults=expected,
-            )
-            if was_created:
+            ).first()
+            if not obj:
+                obj = SiteSurveyEquipmentLine.objects.create(
+                    survey=survey, equipment_category=category, description=description,
+                    **expected,
+                )
                 eq_created += 1
             elif overwrite and _refresh_template_fields(
                 obj, expected, _EQUIPMENT_TEMPLATE_FIELDS,
@@ -1517,12 +1529,14 @@ def seed_default_survey_lines(survey, overwrite=False):
     is_created = is_updated = is_existing = 0
     for sort_order, (issue, improvement_details) in enumerate(ISSUE_ROWS, start=1):
         expected = {'sort_order': sort_order}
-        # improvement_details is template default at create time only; never refreshed.
-        obj, was_created = SiteSurveyIssueLine.objects.get_or_create(
+        obj = SiteSurveyIssueLine.objects.filter(
             survey=survey, issue=issue,
-            defaults={**expected, 'improvement_details': improvement_details},
-        )
-        if was_created:
+        ).first()
+        if not obj:
+            obj = SiteSurveyIssueLine.objects.create(
+                survey=survey, issue=issue,
+                **{**expected, 'improvement_details': improvement_details},
+            )
             is_created += 1
         elif overwrite and _refresh_template_fields(
             obj, expected, _ISSUE_TEMPLATE_FIELDS,
