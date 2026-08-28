@@ -646,7 +646,7 @@ class SiteSurveyShiftDeploymentSerializer(serializers.ModelSerializer):
         description = attrs.get('description') or (self.instance.description if self.instance else '')
 
         if job_role is not None:
-            if survey is not None and job_role.org_id != survey.lead.org_id:
+            if survey is not None and job_role.org_id is not None and survey.lead.org_id is not None and job_role.org_id != survey.lead.org_id:
                 raise serializers.ValidationError({
                     'job_role': 'Job role must belong to the same organization as the survey.',
                 })

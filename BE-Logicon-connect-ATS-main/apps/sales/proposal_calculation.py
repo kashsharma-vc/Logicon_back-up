@@ -148,9 +148,13 @@ def get_wage_rate_for_requirement(role_requirement, on_date=None):
     """
     from apps.wages.services import get_applicable_minimum_wage
 
-    if not role_requirement.wage_category_id:
-        raise ValueError(
-            f'Role requirement #{role_requirement.pk} has no wage_category set.'
+    wage_cat = role_requirement.wage_category
+    if not wage_cat:
+        from apps.wages.models import MinimumWageRate
+        return MinimumWageRate(
+            wage_category=None,
+            monthly_wage=0,
+            daily_wage=0
         )
 
     site = role_requirement.site
@@ -162,7 +166,6 @@ def get_wage_rate_for_requirement(role_requirement, on_date=None):
     else:
         loc_label = '(no location)'
 
-    wage_cat = role_requirement.wage_category
     on_date = on_date or timezone.now().date()
     org = role_requirement.lead.org if role_requirement.lead_id else None
 

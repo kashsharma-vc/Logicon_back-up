@@ -208,6 +208,10 @@ class SalesLeadViewSet(ScopedModelViewSet):
             proposal = generate_proposal_version(lead, request.user)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("generate_proposal failed for lead %s: %s", lead.pk, exc)
+            return Response({'detail': f"Failed to generate proposal: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
         out = ProposalVersionDetailSerializer(proposal, context={'request': request})
         return Response(out.data, status=status.HTTP_201_CREATED)
 

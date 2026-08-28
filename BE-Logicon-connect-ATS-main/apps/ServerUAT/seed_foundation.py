@@ -118,6 +118,7 @@ class Command(BaseCommand):
         permissions = self._seed_permissions()
         self._seed_role_permissions(roles, permissions)
         self._seed_users(org, roles, scope_nodes)
+        self._seed_proposal_component_rules(org)
 
         self.stdout.write(self.style.SUCCESS('\n[OK] ServerUAT foundation seed complete.\n'))
 
@@ -378,3 +379,12 @@ class Command(BaseCommand):
                 f'  [User] {user.username} / {user.email} ({definition["role_code"]} @ {scope_node.path}) - '
                 f'{"CREATED" if created else "EXISTS"}'
             )
+
+    def _seed_proposal_component_rules(self, org):
+        from apps.sales.proposal_calculation import seed_default_proposal_component_rules
+
+        counts = seed_default_proposal_component_rules(org=org, overwrite=False)
+        self.stdout.write(
+            f'  [ProposalComponentRules] Seeded: {counts.get("created", 0)} created, '
+            f'{counts.get("updated", 0)} updated, {counts.get("unchanged", 0)} unchanged.'
+        )
