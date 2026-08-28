@@ -184,6 +184,7 @@ class ProposalBudgetLineSerializer(serializers.ModelSerializer):
             'id', 'proposal_version', 'site', 'site_name', 'role_requirement',
             'service_category', 'job_role', 'job_role_name',
             'description', 'manpower_count', 'unit_cost', 'total_cost',
+            'source_unit_cost', 'source_unit_cost_origin',
             'remarks', 'sort_order',
             'is_manual_override', 'override_reason',
             'overridden_by', 'overridden_by_name', 'overridden_at',
@@ -211,6 +212,7 @@ class ProposalBudgetLineWriteSerializer(serializers.ModelSerializer):
             'id', 'proposal_version', 'site', 'role_requirement',
             'service_category', 'job_role',
             'description', 'manpower_count', 'unit_cost', 'total_cost',
+            'source_unit_cost', 'source_unit_cost_origin',
             'remarks', 'sort_order',
             'is_manual_override', 'override_reason', 'overridden_by', 'overridden_at',
         ]

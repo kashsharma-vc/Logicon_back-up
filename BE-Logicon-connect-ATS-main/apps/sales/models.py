@@ -488,6 +488,8 @@ class ProposalBudgetLine(TimeStampedModel):
     manpower_count = models.PositiveIntegerField(default=1)
     unit_cost = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     total_cost = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    source_unit_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    source_unit_cost_origin = models.CharField(max_length=40, blank=True, default='')
     remarks = models.TextField(blank=True)
     sort_order = models.PositiveIntegerField(default=0)
     is_manual_override = models.BooleanField(default=False)

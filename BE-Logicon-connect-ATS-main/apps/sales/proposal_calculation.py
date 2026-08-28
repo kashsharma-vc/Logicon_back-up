@@ -614,6 +614,8 @@ def generate_proposal_lines_from_requirements(proposal, requirements, force=Fals
             manpower_count=manpower,
             unit_cost=unit_cost,
             total_cost=total_cost,
+            source_unit_cost=unit_cost,
+            source_unit_cost_origin='calculated',
             remarks=remarks,
             sort_order=budget_sort,
         )
