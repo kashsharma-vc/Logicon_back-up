@@ -308,6 +308,10 @@ class SiteSurveyViewSet(ScopedModelViewSet):
             mark_survey_completed(survey, request.user)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("mark_survey_completed failed for survey %s: %s", survey.pk, exc)
+            return Response({'detail': f"Failed to mark survey as completed: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
         out = SiteSurveySerializer(survey, context={'request': request})
         return Response(out.data)
 

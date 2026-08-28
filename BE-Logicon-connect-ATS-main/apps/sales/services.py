@@ -180,33 +180,38 @@ def mark_survey_completed(survey, actor):
     survey.status = 'completed'
     survey.completed_at = timezone.now()
     survey.save(update_fields=['status', 'completed_at', 'updated_at'])
-    lead = survey.lead
-    all_done = not lead.surveys.filter(status__in=('pending', 'in_progress')).exists()
-    if all_done and lead.current_stage in ('submitted_to_operations', 'site_survey_in_progress'):
+    lead = getattr(survey, 'lead', None)
+    all_done = not lead.surveys.filter(status__in=('pending', 'in_progress')).exists() if lead else True
+    if all_done and lead and lead.current_stage in ('submitted_to_operations', 'site_survey_in_progress'):
         lead.current_stage = 'site_survey_completed'
         lead.save(update_fields=['current_stage', 'updated_at'])
-    log_sales_activity(
-        lead=lead,
-        activity_type='survey_completed',
-        title=f'Survey completed: {survey.site.site_name}',
-        actor=actor,
-        site=survey.site,
-        metadata={'survey_id': survey.pk, 'all_surveys_done': all_done},
-    )
-    recipient = lead.sales_person or lead.submitted_to_operations_by or lead.created_by
+
+    site_name = survey.site.site_name if getattr(survey, 'site', None) else 'Site'
+    client_name = lead.client_name if lead else 'Client'
+
+    if lead:
+        log_sales_activity(
+            lead=lead,
+            activity_type='survey_completed',
+            title=f'Survey completed: {site_name}',
+            actor=actor,
+            site=getattr(survey, 'site', None),
+            metadata={'survey_id': survey.pk, 'all_surveys_done': all_done},
+        )
+    recipient = (lead.sales_person or lead.submitted_to_operations_by or lead.created_by) if lead else None
     if recipient is not None:
         try:
             from apps.notifications.services import create_notification
             create_notification(
                 recipient=recipient,
                 actor=actor,
-                org=lead.org,
-                title=f'Site survey completed: {survey.site.site_name}',
-                message=f'Operations completed the survey for {lead.client_name}.',
+                org=lead.org if lead else None,
+                title=f'Site survey completed: {site_name}',
+                message=f'Operations completed the survey for {client_name}.',
                 notification_type='sales_survey_completed',
                 target_type='sales_lead',
-                target_id=lead.pk,
-                target_url=f'/sales/leads/{lead.pk}',
+                target_id=lead.pk if lead else None,
+                target_url=f'/sales/leads/{lead.pk}' if lead else '/sales/leads',
                 metadata={'survey_id': survey.pk, 'all_surveys_done': all_done},
             )
         except Exception:
@@ -1627,7 +1632,7 @@ def _resolve_survey_role_defaults(org, row):
         from apps.wages.models import WageCategory
 
         job_role = row.job_role
-        if job_role is None or job_role.org_id != org.id or not job_role.is_active:
+        if job_role is None or (job_role.org_id is not None and job_role.org_id != org.id) or not job_role.is_active:
             return None, 'job_role_not_available'
 
         mapping = SurveyRoleMapping.objects.select_related(
@@ -1648,7 +1653,9 @@ def _resolve_survey_role_defaults(org, row):
 
         return SimpleNamespace(
             job_role=job_role,
+            job_role_id=getattr(job_role, 'id', None),
             wage_category=wage_category,
+            wage_category_id=getattr(wage_category, 'id', None),
             service_category='',
             shift_hours=None,
             working_days=None,
@@ -1670,20 +1677,22 @@ def _headcount_for_shift_row(row):
         + int(row.first_shift_count or 0)
         + int(row.second_shift_count or 0)
         + int(getattr(row, 'night_shift_count', 0) or 0)
+        + int(getattr(row, 'reliever_count', 0) or 0)
     )
     return sum_shifts
 
 
 def _role_requirement_needs_sync(role_requirement, survey, mapping, headcount):
+    mapping_wage_id = getattr(mapping, 'wage_category_id', getattr(getattr(mapping, 'wage_category', None), 'id', None))
     return any((
         role_requirement.lead_id != survey.lead_id,
         role_requirement.site_id != survey.site_id,
         role_requirement.survey_id != survey.id,
-        role_requirement.wage_category_id != mapping.wage_category_id,
-        (role_requirement.service_category or '') != (mapping.service_category or ''),
+        role_requirement.wage_category_id != mapping_wage_id,
+        (role_requirement.service_category or '') != (getattr(mapping, 'service_category', '') or ''),
         role_requirement.manpower_count != headcount,
-        role_requirement.shift_hours != mapping.shift_hours,
-        role_requirement.working_days != mapping.working_days,
+        role_requirement.shift_hours != getattr(mapping, 'shift_hours', None),
+        role_requirement.working_days != getattr(mapping, 'working_days', None),
         role_requirement.is_active is not True,
         role_requirement.created_from_survey is not True,
     ))
@@ -1692,10 +1701,10 @@ def _role_requirement_needs_sync(role_requirement, survey, mapping, headcount):
 def _sync_generated_role_requirement(role_requirement, survey, mapping, headcount):
     role_requirement.site = survey.site
     role_requirement.wage_category = mapping.wage_category
-    role_requirement.service_category = mapping.service_category
+    role_requirement.service_category = getattr(mapping, 'service_category', '') or ''
     role_requirement.manpower_count = headcount
-    role_requirement.shift_hours = mapping.shift_hours
-    role_requirement.working_days = mapping.working_days
+    role_requirement.shift_hours = getattr(mapping, 'shift_hours', None)
+    role_requirement.working_days = getattr(mapping, 'working_days', None)
     role_requirement.is_active = True
     role_requirement.created_from_survey = True
     role_requirement.save(update_fields=[
