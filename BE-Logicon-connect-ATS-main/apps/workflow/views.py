@@ -278,7 +278,18 @@ class AvailableRoutesView(APIView):
     Returns preview of available ApprovalRoutes for the given scope.
     """
     permission_classes = [IsAuthenticated, HasAnyCapability]
-    required_capabilities = ['workflow.read', 'workflow.start_workflow']
+    required_capabilities = [
+        'workflow.read',
+        'workflow.start_workflow',
+        'sales_proposal.read',
+        'sales_proposal.create',
+        'sales_proposal.update',
+        'sales_lead.read',
+        'mrf.read',
+        'mrf.create',
+        'client_onboarding.read',
+        'client_onboarding.create',
+    ]
 
     def get(self, request):
         from .models import ApprovalRoute
