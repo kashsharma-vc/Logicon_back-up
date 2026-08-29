@@ -13,6 +13,7 @@ Tests cover:
 """
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -374,7 +375,8 @@ class TestReprocessAudit(TestCase):
 
     def test_16_reprocess_creates_audit_row_and_clears_errors(self):
         url = f'/api/talent/resumes/{self.resume.pk}/reprocess/'
-        resp = self.api.post(url, {'note': 'Retrying after API key added'}, format='json')
+        with patch('apps.talent.tasks.process_resume_task.delay'):
+            resp = self.api.post(url, {'note': 'Retrying after API key added'}, format='json')
         self.assertEqual(resp.status_code, 200)
 
         self.resume.refresh_from_db()

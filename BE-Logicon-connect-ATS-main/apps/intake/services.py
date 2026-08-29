@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps/intake/services.py
 
 Intake submission business logic:
@@ -29,13 +29,22 @@ from .models import (
 # Constants
 
 _FAKE_NUMBERS = {'0000000000', '1111111111', '1234567890', '9999999999'}
-_ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'}
+_ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'}
 _ALLOWED_CONTENT_TYPES = {
     'application/pdf',
+    'application/x-pdf',
     'application/msword',
+    'application/doc',
+    'application/x-msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'image/jpeg',
+    'image/jpg',
+    'image/pjpeg',
     'image/png',
+    'image/x-png',
+    'text/plain',
+    'application/octet-stream',
+    'binary/octet-stream',
 }
 MAX_FILES_PER_SUBMISSION = 5
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
@@ -180,6 +189,21 @@ def _sync_candidate_from_submission(candidate, submission, answers_data: list) -
     if location and not candidate.current_location:
         updates['current_location'] = str(location).strip()
 
+    pref_location = _first_answer_value(values, 'preferred_location', 'preferred_city')
+    if pref_location and not candidate.preferred_location:
+        updates['preferred_location'] = str(pref_location).strip()
+
+    availability = _first_answer_value(values, 'joining_availability', 'available_from', 'availability_date')
+    if availability and not candidate.available_from:
+        try:
+            from django.utils.dateparse import parse_date
+            parsed = parse_date(str(availability).strip())
+            if parsed:
+                updates['available_from'] = parsed
+                updates['availability_status'] = 'available_from_date'
+        except Exception:
+            pass
+
     experience = _decimal_or_none(
         _first_answer_value(
             values,
@@ -249,10 +273,10 @@ def validate_submission_file(uploaded_file):
     ext = Path(uploaded_file.name).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
         raise serializers.ValidationError(
-            f"File '{uploaded_file.name}' has an unsupported file type."
+            f"File '{uploaded_file.name}' has an unsupported file type ({ext}). Allowed types: PDF, DOC, DOCX, JPG, PNG."
         )
-    ct = getattr(uploaded_file, 'content_type', '')
-    if ct and ct not in _ALLOWED_CONTENT_TYPES:
+    ct = (getattr(uploaded_file, 'content_type', '') or '').split(';')[0].strip().lower()
+    if ct and ct not in _ALLOWED_CONTENT_TYPES and not ct.startswith('image/') and not ct.startswith('application/'):
         raise serializers.ValidationError(
             f"File '{uploaded_file.name}' has an unsupported content type."
         )
@@ -314,14 +338,32 @@ def validate_submission_documents(campaign, job_role, files) -> None:
         )
 
 
-def _document_type_from_field_name(field_name: str) -> str:
-    n = field_name.lower()
-    if n == 'resume':
+def _document_type_from_field_name(
+    field_name: str, campaign_field=None, tmpl_field=None, filename: str = ''
+) -> str:
+    n = (field_name or '').lower()
+    if n == 'resume' or 'resume' in n or 'cv' in n:
         return 'resume'
-    if n in {'id_proof', 'idproof', 'identity'}:
+    if n in {'id_proof', 'idproof', 'identity'} or 'id_proof' in n or 'idproof' in n or 'aadhaar' in n or 'pan' in n:
         return 'id_proof'
-    if n in {'certificate', 'certificates'}:
+    if n in {'certificate', 'certificates'} or 'certificate' in n:
         return 'certificate'
+
+    field_obj = campaign_field or tmpl_field
+    if field_obj:
+        key = (getattr(field_obj, 'field_key', '') or '').lower()
+        label = (getattr(field_obj, 'label', '') or '').lower()
+        if 'resume' in key or 'cv' in key or 'resume' in label or 'cv' in label:
+            return 'resume'
+        if any(w in key or w in label for w in ('id_proof', 'idproof', 'identity', 'aadhaar', 'pan', 'voter')):
+            return 'id_proof'
+        if any(w in key or w in label for w in ('certificate', 'qualification', 'degree', 'diploma')):
+            return 'certificate'
+
+    fn = (filename or '').lower()
+    if 'resume' in fn or 'cv' in fn:
+        return 'resume'
+
     return 'other'
 
 
@@ -465,36 +507,40 @@ def _link_resume_if_needed(doc: IntakeDocument, candidate) -> None:
     except Exception:
         pass
 
-    resume, created = Resume.objects.get_or_create(
-        source_intake_document=doc,
-        defaults={
-            'candidate': candidate,
-            'file': doc.file,
-            'original_filename': doc.original_filename,
-            'content_type': doc.content_type,
-            'size_bytes': doc.size_bytes,
-            'source_type': 'qr_intake',
-            'status': 'uploaded',
-            'file_hash': file_hash,
-            'document_type': determine_document_type(doc.original_filename, doc.content_type),
-            'target_job_role': doc.submission.job_role,
-            'target_role_source': 'qr_intake' if doc.submission.job_role_id else '',
-        },
-    )
+    try:
+        resume, created = Resume.objects.get_or_create(
+            source_intake_document=doc,
+            defaults={
+                'candidate': candidate,
+                'file': doc.file,
+                'original_filename': doc.original_filename,
+                'content_type': doc.content_type,
+                'size_bytes': doc.size_bytes,
+                'source_type': 'qr_intake',
+                'status': 'uploaded',
+                'file_hash': file_hash,
+                'document_type': determine_document_type(doc.original_filename, doc.content_type),
+                'target_job_role': doc.submission.job_role,
+                'target_role_source': 'qr_intake' if doc.submission.job_role_id else '',
+            },
+        )
 
-    if not created:
-        updates = {}
-        document_type = determine_document_type(doc.original_filename, doc.content_type)
-        if resume.document_type in ('', 'unknown') and document_type != 'unknown':
-            updates['document_type'] = document_type
-        if not resume.target_job_role_id and doc.submission.job_role_id:
-            updates['target_job_role'] = doc.submission.job_role
-            updates['target_role_source'] = 'qr_intake'
-        if updates:
-            Resume.objects.filter(pk=resume.pk).update(**updates)
+        if not created:
+            updates = {}
+            document_type = determine_document_type(doc.original_filename, doc.content_type)
+            if resume.document_type in ('', 'unknown') and document_type != 'unknown':
+                updates['document_type'] = document_type
+            if not resume.target_job_role_id and doc.submission.job_role_id:
+                updates['target_job_role'] = doc.submission.job_role
+                updates['target_role_source'] = 'qr_intake'
+            if updates:
+                Resume.objects.filter(pk=resume.pk).update(**updates)
 
-    if created:
-        queue_resume_processing(resume)
+        if created:
+            queue_resume_processing(resume)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Failed to link resume for doc %s", doc.pk)
 
 
 def create_intake_documents(submission: IntakeSubmission, files) -> list:
@@ -502,14 +548,21 @@ def create_intake_documents(submission: IntakeSubmission, files) -> list:
     all_files = _iter_uploaded_files(files)
 
     documents = []
+    has_resume_doc = False
     for field_name, f in all_files:
         campaign_field, tmpl_field = _get_field_fk_for_file(submission, field_name)
+        doc_type = _document_type_from_field_name(
+            field_name, campaign_field=campaign_field, tmpl_field=tmpl_field, filename=f.name,
+        )
+        if doc_type == 'resume':
+            has_resume_doc = True
+
         doc = IntakeDocument.objects.create(
             submission=submission,
             field=campaign_field,
             template_field=tmpl_field,
             field_source='template' if tmpl_field else 'campaign',
-            document_type=_document_type_from_field_name(field_name),
+            document_type=doc_type,
             file=f,
             original_filename=f.name,
             content_type=getattr(f, 'content_type', ''),
@@ -517,5 +570,11 @@ def create_intake_documents(submission: IntakeSubmission, files) -> list:
         )
         _link_resume_if_needed(doc, submission.candidate)
         documents.append(doc)
+
+    if not has_resume_doc and len(documents) == 1:
+        single_doc = documents[0]
+        single_doc.document_type = 'resume'
+        single_doc.save(update_fields=['document_type', 'updated_at'])
+        _link_resume_if_needed(single_doc, submission.candidate)
 
     return documents

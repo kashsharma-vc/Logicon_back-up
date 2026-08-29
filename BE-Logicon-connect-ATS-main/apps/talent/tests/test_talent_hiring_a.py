@@ -28,6 +28,9 @@ from apps.hiring.models import (
 )
 
 
+from unittest.mock import patch
+
+
 # ─── Shared helpers ───────────────────────────────────────────────────────────
 
 def _org(suffix='tha'):
@@ -234,7 +237,8 @@ class TestTalentServices(TestCase):
 
     # test_11
     def test_11_queue_resume_processing_sets_extracting(self):
-        queue_resume_processing(self.resume)
+        with patch('apps.talent.tasks.process_resume_task.delay'):
+            queue_resume_processing(self.resume)
         self.resume.refresh_from_db()
         self.assertEqual(self.resume.status, 'extracting')
 
@@ -403,7 +407,8 @@ class TestQRIntakeLinksResume(TestCase):
                 return v if isinstance(v, list) else [v]
 
         files = _MultiValueDict({'resume': [pdf]})
-        docs = create_intake_documents(submission, files)
+        with patch('apps.talent.tasks.process_resume_task.delay'):
+            docs = create_intake_documents(submission, files)
 
         self.assertEqual(len(docs), 1)
         self.assertEqual(docs[0].document_type, 'resume')

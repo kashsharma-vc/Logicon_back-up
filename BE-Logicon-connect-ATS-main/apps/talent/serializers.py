@@ -104,15 +104,17 @@ class CandidateSerializer(serializers.ModelSerializer):
         return r['status'] if r else None
 
     def get_latest_document_type(self, obj):
-        r = obj.resumes.order_by('-uploaded_at').values('document_type').first()
-        if r:
-            return r['document_type']
         item = (
             obj.resume_import_items
             .select_related('batch')
             .order_by('-created_at')
             .first()
         )
+        r = obj.resumes.order_by('-uploaded_at').first()
+        if r:
+            if item and r.source_type == 'excel_import' and getattr(r, 'extraction_engine', '') == 'auto_generated_pdf':
+                return item.document_type
+            return r.document_type
         return item.document_type if item else None
 
     def get_latest_source_type(self, obj):

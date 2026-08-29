@@ -78,6 +78,9 @@ DOCUMENT_TYPE_CHOICES = [
     ('txt', 'Text'),
     ('xlsx', 'Excel'),
     ('csv', 'CSV'),
+    ('png', 'PNG'),
+    ('jpg', 'JPG'),
+    ('jpeg', 'JPEG'),
     ('unknown', 'Unknown'),
 ]
 

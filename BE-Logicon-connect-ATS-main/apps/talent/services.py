@@ -57,12 +57,12 @@ def compute_file_hash(f) -> str:
 def determine_document_type(filename: str = '', content_type: str = '') -> str:
     """Return the normalized document type used by resume/import filters."""
     filename = (filename or '').lower().strip()
-    content_type = (content_type or '').lower().strip()
+    content_type = (content_type or '').lower().strip().split(';')[0].strip()
     ext = filename.rsplit('.', 1)[-1] if '.' in filename else ''
 
-    if ext in {'pdf', 'docx', 'doc', 'txt', 'xlsx', 'csv'}:
+    if ext in {'pdf', 'docx', 'doc', 'txt', 'xlsx', 'csv', 'png', 'jpg', 'jpeg'}:
         return ext
-    if content_type == 'application/pdf':
+    if content_type in {'application/pdf', 'application/x-pdf'}:
         return 'pdf'
     if content_type == 'text/plain':
         return 'txt'
@@ -70,7 +70,7 @@ def determine_document_type(filename: str = '', content_type: str = '') -> str:
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     }:
         return 'docx'
-    if content_type == 'application/msword':
+    if content_type in {'application/msword', 'application/doc', 'application/x-msword'}:
         return 'doc'
     if content_type in {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -79,6 +79,10 @@ def determine_document_type(filename: str = '', content_type: str = '') -> str:
         return 'xlsx'
     if content_type in {'text/csv', 'application/csv'}:
         return 'csv'
+    if content_type in {'image/png', 'image/x-png'}:
+        return 'png'
+    if content_type in {'image/jpeg', 'image/jpg', 'image/pjpeg'}:
+        return 'jpg'
     return 'unknown'
 
 
@@ -103,8 +107,12 @@ def queue_resume_processing(resume: Resume) -> None:
     Resume.objects.filter(pk=resume.pk).update(status='extracting')
     resume.status = 'extracting'
 
-    from apps.talent.tasks import process_resume_task
-    process_resume_task.delay(resume.pk)
+    try:
+        from apps.talent.tasks import process_resume_task
+        process_resume_task.delay(resume.pk)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("Celery queue unavailable for resume %s", resume.pk)
 
 
 def mark_resume_manual_review(resume: Resume, reason: str) -> None:
