@@ -143,9 +143,22 @@ export function SearchableSelect({
           {/* Options list */}
           <div className="max-h-72 overflow-y-auto p-1.5 text-xs divide-y divide-app-border/30">
             {filteredOptions.length === 0 ? (
-              <div className="py-6 text-center text-app-subtle">
+              <div className="py-5 text-center text-app-subtle space-y-2">
                 <p className="font-medium">No matching roles found</p>
-                <p className="text-[11px] mt-0.5">Try searching with a different keyword</p>
+                {options.some((o) => o.value === 'other') ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange('other')
+                      setOpen(false)
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500/15 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-500/25 dark:text-brand-300"
+                  >
+                    ➕ Select Other (Type manually)
+                  </button>
+                ) : (
+                  <p className="text-[11px]">Try searching with a different keyword</p>
+                )}
               </div>
             ) : (
               filteredOptions.map((opt, idx) => {
