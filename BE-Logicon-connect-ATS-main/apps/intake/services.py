@@ -194,12 +194,11 @@ def _sync_candidate_from_submission(candidate, submission, answers_data: list) -
         updates['preferred_location'] = str(pref_location).strip()
 
     availability = _first_answer_value(values, 'joining_availability', 'available_from', 'availability_date')
-    if availability and not candidate.available_from:
+    if availability and getattr(candidate, 'availability_status', 'unknown') == 'unknown':
         try:
             from django.utils.dateparse import parse_date
             parsed = parse_date(str(availability).strip())
             if parsed:
-                updates['available_from'] = parsed
                 updates['availability_status'] = 'available_from_date'
         except Exception:
             pass
