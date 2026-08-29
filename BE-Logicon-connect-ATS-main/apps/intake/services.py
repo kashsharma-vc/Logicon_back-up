@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.db import IntegrityError, connection
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
@@ -418,6 +418,7 @@ def _get_client_ip(request) -> str:
     return request.META.get('REMOTE_ADDR', '')
 
 
+@transaction.atomic
 def create_intake_submission(validated_data: dict, request=None) -> IntakeSubmission:
     """
     Core submission creation service.

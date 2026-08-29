@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
+from django.db import transaction, connection
 from django.utils import timezone
 
 from .models import QRCampaign
@@ -79,20 +80,21 @@ class PublicSubmissionCreateView(APIView):
 
     def post(self, request, *args, **kwargs):
         try:
-            serializer = SubmissionCreateSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            validate_submission_documents(
-                serializer.validated_data['campaign'],
-                serializer.validated_data.get('job_role'),
-                request.FILES,
-            )
+            with transaction.atomic():
+                serializer = SubmissionCreateSerializer(data=request.data)
+                serializer.is_valid(raise_exception=True)
+                validate_submission_documents(
+                    serializer.validated_data['campaign'],
+                    serializer.validated_data.get('job_role'),
+                    request.FILES,
+                )
 
-            submission = create_intake_submission(
-                serializer.validated_data, request=request,
-            )
+                submission = create_intake_submission(
+                    serializer.validated_data, request=request,
+                )
 
-            if request.FILES:
-                create_intake_documents(submission, request.FILES)
+                if request.FILES:
+                    create_intake_documents(submission, request.FILES)
 
             out = SubmissionResponseSerializer(submission)
             return Response(out.data, status=status.HTTP_201_CREATED)
