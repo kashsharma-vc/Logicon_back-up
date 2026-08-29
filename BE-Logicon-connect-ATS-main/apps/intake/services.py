@@ -168,10 +168,39 @@ def _sync_candidate_from_submission(candidate, submission, answers_data: list) -
     values = _answer_value_by_key(answers_data)
     updates = {}
 
-    if submission.job_role_id and not candidate.target_job_role_id:
-        updates['target_job_role'] = submission.job_role
-    if submission.job_role_id and not candidate.current_role:
-        updates['current_role'] = submission.job_role.name
+    if submission.other_role_title:
+        role_name = submission.other_role_title.strip()
+        if not candidate.current_role:
+            updates['current_role'] = role_name
+        from apps.jobs.models import JobRole
+        from django.utils.text import slugify
+        existing_role = JobRole.objects.filter(
+            Q(org=submission.campaign.org) | Q(org__isnull=True),
+            name__iexact=role_name,
+        ).first()
+        if not existing_role:
+            base_code = slugify(role_name)[:55] or 'role'
+            code = base_code
+            counter = 1
+            while JobRole.objects.filter(Q(org=submission.campaign.org) | Q(org__isnull=True), code=code).exists():
+                code = f"{base_code[:50]}_{counter}"
+                counter += 1
+            existing_role = JobRole.objects.create(
+                org=submission.campaign.org,
+                name=role_name,
+                code=code,
+                is_active=True,
+            )
+        if not submission.job_role_id:
+            submission.job_role = existing_role
+            submission.save(update_fields=['job_role'])
+        if not candidate.target_job_role_id:
+            updates['target_job_role'] = existing_role
+    elif submission.job_role_id:
+        if not candidate.target_job_role_id:
+            updates['target_job_role'] = submission.job_role
+        if not candidate.current_role:
+            updates['current_role'] = submission.job_role.name
     if not candidate.source_reference:
         updates['source_reference'] = f'qr_campaign:{submission.campaign_id}:submission:{submission.pk}'
 

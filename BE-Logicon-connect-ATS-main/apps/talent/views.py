@@ -162,7 +162,10 @@ class CandidateViewSet(ReadAfterWriteMixin, ActionCapabilityMixin, ScopedQueryse
                 Q(resume_import_items__batch__source_type=source_type)
             ).distinct()
 
-        return qs.order_by('last_name', 'first_name', 'id')
+        ordering = self.request.query_params.get('ordering', '').strip()
+        if ordering:
+            return qs.order_by(ordering)
+        return qs.order_by('-created_at', '-id')
 
     def get_serializer_class(self):
         if self.action in ('create', 'partial_update', 'update'):
