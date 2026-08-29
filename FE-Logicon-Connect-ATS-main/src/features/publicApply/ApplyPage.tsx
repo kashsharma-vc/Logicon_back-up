@@ -37,14 +37,16 @@ function SectionCard({
   icon: Icon,
   title,
   children,
+  className,
 }: {
   icon: React.ElementType
   title: string
   children: ReactNode
+  className?: string
 }) {
   return (
-    <div className="overflow-hidden rounded-panel border border-app-border bg-app-surface shadow-panel">
-      <div className="flex items-center gap-2 border-b border-app-border bg-app-muted px-4 py-3">
+    <div className={cn('rounded-panel border border-app-border bg-app-surface shadow-panel', className)}>
+      <div className="flex items-center gap-2 rounded-t-panel border-b border-app-border bg-app-muted px-4 py-3">
         <Icon className="h-4 w-4 text-brand-600" aria-hidden />
         <h2 className="text-sm font-semibold text-app-text">{title}</h2>
       </div>
@@ -128,16 +130,11 @@ export function ApplyPage() {
 
   const roles: PublicRole[] = useMemo(() => campaign?.roles ?? [], [campaign])
   const roleOptions: SelectOption[] = useMemo(() => {
-    const list: SelectOption[] = roles.map((r) => ({
+    return roles.map((r) => ({
       value: String(r.id),
       label: r.name,
     }))
-    list.push({
-      value: 'other',
-      label: `➕ ${t(lang, 'otherRole')} (Type manually)`,
-    })
-    return list
-  }, [roles, lang])
+  }, [roles])
   const enabledLanguages = useMemo(() => campaign?.enabled_languages ?? ['en'], [campaign])
   const showLanguage = enabledLanguages.length > 1
 
@@ -506,59 +503,95 @@ export function ApplyPage() {
 
         {/* Applying For */}
         <SectionCard icon={Briefcase} title={t(lang, 'applyingFor')}>
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="role_select" className="mb-1.5 block text-sm font-medium text-app-text">
-                Select Role <span className="text-status-danger">*</span>
-              </label>
-              <SearchableSelect
-                id="role_select"
-                options={roleOptions}
-                value={candidate.role_id}
-                onChange={(val) => {
-                  setCandidate((v) => ({
-                    ...v,
-                    role_id: val,
-                    other_role_title: val === 'other' ? v.other_role_title : '',
-                  }))
-                  clearCandidateError('role_id')
-                }}
-                placeholder="-- Select or Search a Role --"
-                searchPlaceholder="Type to search roles or choose Other..."
-                className={cn(
-                  candidateErrors.role_id && '[&>button]:border-status-danger',
-                )}
-              />
-            </div>
-
-            {candidateErrors.role_id ? (
-              <p className="text-sm text-status-danger" role="alert">{candidateErrors.role_id}</p>
-            ) : null}
-
-            {candidate.role_id === 'other' ? (
-              <div className="flex flex-col gap-1.5 pt-1">
-                <label htmlFor="other_role_title" className="text-sm font-medium text-app-secondary">
-                  {t(lang, 'otherRole')} <span className="text-status-danger">*</span>
-                </label>
+          <div className="space-y-4">
+            {/* Option 1: Select from Available Roles */}
+            <div className="space-y-2">
+              <label className="flex cursor-pointer items-center gap-2.5">
                 <input
-                  id="other_role_title"
-                  value={candidate.other_role_title}
-                  onChange={(e) => {
-                    setCandidate((v) => ({ ...v, other_role_title: e.target.value }))
+                  type="radio"
+                  name="role_selection_mode"
+                  checked={candidate.role_id !== 'other'}
+                  onChange={() => {
+                    setCandidate((v) => ({ ...v, role_id: roles[0] ? String(roles[0].id) : '', other_role_title: '' }))
+                    clearCandidateError('role_id')
                     clearCandidateError('other_role_title')
                   }}
-                  className={cn(
-                    'min-h-10 rounded-panel border bg-app-surface px-3 py-2 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30',
-                    candidateErrors.other_role_title ? 'border-status-danger' : 'border-app-border',
-                  )}
-                  placeholder={t(lang, 'otherRolePlaceholder')}
+                  className="h-4 w-4 text-brand-600 focus:ring-brand-500 border-app-border"
                   disabled={submitting}
                 />
-                {candidateErrors.other_role_title ? (
-                  <p className="text-sm text-status-danger" role="alert">{candidateErrors.other_role_title}</p>
-                ) : null}
-              </div>
-            ) : null}
+                <span className="text-sm font-semibold text-app-text">
+                  Choose from available job roles
+                </span>
+              </label>
+
+              {candidate.role_id !== 'other' && (
+                <div className="pl-6 pt-1 space-y-1.5">
+                  <SearchableSelect
+                    id="role_select"
+                    options={roleOptions}
+                    value={candidate.role_id}
+                    onChange={(val) => {
+                      setCandidate((v) => ({ ...v, role_id: val, other_role_title: '' }))
+                      clearCandidateError('role_id')
+                    }}
+                    placeholder="-- Select or Search a Role --"
+                    searchPlaceholder="Type to search roles (e.g. Electrician, Security, Plumber)..."
+                    className={cn(
+                      candidateErrors.role_id && '[&>button]:border-status-danger',
+                    )}
+                  />
+                  {candidateErrors.role_id ? (
+                    <p className="text-sm text-status-danger" role="alert">{candidateErrors.role_id}</p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* Option 2: Other Role (Type manually) */}
+            <div className="space-y-2 pt-3 border-t border-app-border/50">
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <input
+                  type="radio"
+                  name="role_selection_mode"
+                  checked={candidate.role_id === 'other'}
+                  onChange={() => {
+                    setCandidate((v) => ({ ...v, role_id: 'other' }))
+                    clearCandidateError('role_id')
+                  }}
+                  className="h-4 w-4 text-brand-600 focus:ring-brand-500 border-app-border"
+                  disabled={submitting}
+                />
+                <span className="text-sm font-semibold text-app-text">
+                  {t(lang, 'otherRole')} (Specify custom role manually)
+                </span>
+              </label>
+
+              {candidate.role_id === 'other' && (
+                <div className="pl-6 pt-1 space-y-1.5">
+                  <label htmlFor="other_role_title" className="block text-xs font-medium text-app-secondary">
+                    Role Title <span className="text-status-danger">*</span>
+                  </label>
+                  <input
+                    id="other_role_title"
+                    value={candidate.other_role_title}
+                    onChange={(e) => {
+                      setCandidate((v) => ({ ...v, other_role_title: e.target.value }))
+                      clearCandidateError('other_role_title')
+                    }}
+                    className={cn(
+                      'min-h-10 w-full rounded-panel border bg-app-surface px-3 py-2 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30',
+                      candidateErrors.other_role_title ? 'border-status-danger' : 'border-app-border',
+                    )}
+                    placeholder={t(lang, 'otherRolePlaceholder')}
+                    disabled={submitting}
+                    autoFocus
+                  />
+                  {candidateErrors.other_role_title ? (
+                    <p className="text-sm text-status-danger" role="alert">{candidateErrors.other_role_title}</p>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </div>
         </SectionCard>
 
