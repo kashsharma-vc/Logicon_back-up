@@ -341,10 +341,30 @@ class PublicCampaignSerializer(serializers.ModelSerializer):
 
     def get_roles(self, obj):
         active_cjrs = obj.campaign_job_roles.filter(is_active=True).select_related('job_role')
-        return [
+        roles_list = [
             {'id': cjr.job_role.id, 'name': cjr.job_role.name, 'code': cjr.job_role.code}
             for cjr in active_cjrs
+            if cjr.job_role is not None and cjr.job_role.is_active
         ]
+        if roles_list:
+            return roles_list
+
+        from apps.jobs.models import JobRole
+        from django.db.models import Q
+
+        if obj.site_id:
+            from apps.sites.models import SiteRoleRequirement
+            site_role_ids = SiteRoleRequirement.objects.filter(
+                site=obj.site, is_active=True, job_role__isnull=False,
+            ).values_list('job_role_id', flat=True).distinct()
+            if site_role_ids:
+                site_roles = JobRole.objects.filter(id__in=site_role_ids, is_active=True).order_by('name')
+                return [{'id': r.id, 'name': r.name, 'code': r.code} for r in site_roles]
+
+        org_roles = JobRole.objects.filter(
+            is_active=True,
+        ).filter(Q(org=obj.org) | Q(org__isnull=True)).order_by('name')
+        return [{'id': r.id, 'name': r.name, 'code': r.code} for r in org_roles]
 
     def get_common_fields(self, obj):
         if obj.form_template_id:
@@ -612,15 +632,27 @@ class SubmissionCreateSerializer(serializers.Serializer):
     def _resolve_job_role(self, campaign, job_role_id):
         if job_role_id is None:
             return None
-        try:
-            cjr = campaign.campaign_job_roles.select_related('job_role').get(
-                job_role_id=job_role_id, is_active=True,
-            )
-            return cjr.job_role
-        except Exception:
-            raise serializers.ValidationError(
-                "Selected role is not valid for this campaign."
-            )
+        active_cjrs = campaign.campaign_job_roles.filter(is_active=True)
+        if active_cjrs.exists():
+            try:
+                cjr = active_cjrs.select_related('job_role').get(job_role_id=job_role_id)
+                return cjr.job_role
+            except Exception:
+                raise serializers.ValidationError(
+                    "Selected role is not valid for this campaign."
+                )
+
+        from apps.jobs.models import JobRole
+        from django.db.models import Q
+        role = JobRole.objects.filter(
+            id=job_role_id, is_active=True,
+        ).filter(Q(org=campaign.org) | Q(org__isnull=True)).first()
+        if role is not None:
+            return role
+
+        raise serializers.ValidationError(
+            "Selected role is not valid for this campaign."
+        )
 
     def _validate_required_fields(
         self, campaign, job_role, provided_field_ids, provided_template_field_ids, validated_answers
