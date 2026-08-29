@@ -318,6 +318,10 @@ def validate_submission_documents(campaign, job_role, files) -> None:
         ).filter(Q(role__isnull=True) | Q(role=job_role))
         for field in required_file_fields:
             allowed_names = {field.field_key, f'template_field_{field.id}'}
+            key_l = (field.field_key or '').lower()
+            lbl_l = (field.label or '').lower()
+            if 'resume' in key_l or 'cv' in key_l or 'resume' in lbl_l or 'cv' in lbl_l:
+                allowed_names.add('resume')
             if not provided_names.intersection(allowed_names):
                 missing.append(field.label)
     else:
@@ -329,6 +333,10 @@ def validate_submission_documents(campaign, job_role, files) -> None:
         ).filter(Q(role__isnull=True) | Q(role=job_role))
         for field in required_file_fields:
             allowed_names = {field.field_key, f'field_{field.id}', f'file_{field.id}'}
+            key_l = (field.field_key or '').lower()
+            lbl_l = (field.label or '').lower()
+            if 'resume' in key_l or 'cv' in key_l or 'resume' in lbl_l or 'cv' in lbl_l:
+                allowed_names.add('resume')
             if not provided_names.intersection(allowed_names):
                 missing.append(field.label)
 

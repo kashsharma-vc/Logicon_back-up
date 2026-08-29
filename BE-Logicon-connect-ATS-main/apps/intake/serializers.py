@@ -471,7 +471,7 @@ class SubmissionCreateSerializer(serializers.Serializer):
         return _validate_name_part(value, 'Middle name', required=False, min_len=0)
 
     def validate_last_name(self, value):
-        return _validate_name_part(value, 'Last name', required=True, min_len=2)
+        return _validate_name_part(value, 'Last name', required=False, min_len=0)
 
     def validate_other_role_title(self, value):
         if value:
@@ -632,18 +632,17 @@ class SubmissionCreateSerializer(serializers.Serializer):
     def _resolve_job_role(self, campaign, job_role_id):
         if job_role_id is None:
             return None
-        active_cjrs = campaign.campaign_job_roles.filter(is_active=True)
-        if active_cjrs.exists():
-            try:
-                cjr = active_cjrs.select_related('job_role').get(job_role_id=job_role_id)
-                return cjr.job_role
-            except Exception:
-                raise serializers.ValidationError(
-                    "Selected role is not valid for this campaign."
-                )
-
         from apps.jobs.models import JobRole
         from django.db.models import Q
+
+        # Check if matched in active campaign job roles
+        active_cjrs = campaign.campaign_job_roles.filter(is_active=True, job_role_id=job_role_id)
+        if active_cjrs.exists():
+            cjr = active_cjrs.select_related('job_role').first()
+            if cjr and cjr.job_role:
+                return cjr.job_role
+
+        # Fallback: check active JobRole in org or global
         role = JobRole.objects.filter(
             id=job_role_id, is_active=True,
         ).filter(Q(org=campaign.org) | Q(org__isnull=True)).first()

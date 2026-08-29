@@ -314,12 +314,18 @@ export function ApplyPage() {
       if (axios.isAxiosError(e) && e.response?.data) {
         const data = e.response.data as unknown
         if (data && typeof data === 'object') {
-          const msg = Object.values(data as Record<string, unknown>)
-            .flatMap((v) => (Array.isArray(v) ? v : [v]))
-            .map((v) => (typeof v === 'string' ? v : ''))
-            .filter(Boolean)
-            .join(' ')
-          setGlobalError(msg || t(lang, 'submitError'))
+          if ('detail' in data && typeof (data as any).detail === 'string') {
+            setGlobalError((data as any).detail)
+          } else {
+            const msg = Object.entries(data as Record<string, unknown>)
+              .map(([key, val]) => {
+                const text = Array.isArray(val) ? val.join(', ') : String(val)
+                return `${key !== 'non_field_errors' ? `${key}: ` : ''}${text}`
+              })
+              .filter(Boolean)
+              .join(' | ')
+            setGlobalError(msg || t(lang, 'submitError'))
+          }
         } else {
           setGlobalError(t(lang, 'submitError'))
         }
