@@ -1,0 +1,182 @@
+@import './theme.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  body {
+    @apply min-h-screen bg-app-bg text-app-text;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--color-heading);
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  #root {
+    @apply min-h-screen;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  /* Scrollbar styling (Firefox + WebKit) — uses theme variables only. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  *::-webkit-scrollbar-track {
+    background: var(--color-scrollbar-track);
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-scrollbar-thumb);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-scrollbar-thumb-hover);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+}
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+  .fade-in {
+    animation-name: fade-in;
+  }
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}
+}
+
+@layer utilities {
+  .animate-in {
+    animation-fill-mode: both;
+  }
+  .fade-in {
+    animation-name: fade-in;
+  }
+}

@@ -1,0 +1,188 @@
+:root {
+  /* Brand scale (Logicon blue system) */
+  --color-primary-900: #042c53;
+  --color-primary-800: #0c447c;
+  --color-primary-700: #144a80;
+  --color-primary-600: #185fa5;
+  --color-primary-500: #2e7bdc;
+  --color-primary-400: #378add;
+
+  /* Light — page & typography */
+  --color-bg: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #e6f1fb;
+  --color-border: #dbe4ec;
+  --color-text: #333333;
+  --color-text-secondary: #5c5c5c;
+  --color-text-muted: #737373;
+  --color-heading: #042c53;
+  --color-link: #185fa5;
+
+  /* Topbar wordmark (inline background-clip text) — explicit gradient, not Tailwind from-/to- vars */
+  --wordmark-gradient: linear-gradient(100deg, #042c53 0%, #185fa5 45%, #2e7bdc 100%);
+
+  /* Sidebar sits on the same surface as the page; divider + tokens provide structure */
+  --color-nav-bg: var(--color-surface);
+  --color-nav-border: var(--color-border);
+  /* Subtle divider only — avoids a “second shade” next to the white topbar */
+  --color-nav-inset-line: rgba(15, 23, 42, 0.04);
+  --color-nav-drawer-shadow: rgba(15, 23, 42, 0.12);
+  --color-nav-label: var(--color-text-muted);
+  --color-nav-link: var(--color-text-secondary);
+  --color-nav-link-hover: rgba(24, 95, 165, 0.1);
+  --color-nav-wordmark: var(--color-heading);
+  --color-nav-icon-button-hover: rgba(15, 23, 42, 0.06);
+  --color-nav-focus-ring: rgba(24, 95, 165, 0.35);
+  --color-nav-overlay: rgba(15, 23, 42, 0.45);
+  --color-nav-active-border: var(--color-heading);
+
+  --color-accent-fill: #e6f1fb;
+
+  --color-btn-primary: #185fa5;
+  --color-btn-primary-hover: #134a85;
+  --color-btn-ghost-fg: #378add;
+  --color-btn-ghost-hover-bg: #e6f1fb;
+
+  --color-info: #185fa5;
+  --color-neutral: #737373;
+  --color-success: #16a34a;
+  --color-warning: #f59e0b;
+  --color-danger: #dc2626;
+  --color-hired: #15803d;
+  --color-attention: #a855f7;
+  --color-hired-bg: rgba(21, 128, 61, 0.1);
+  --color-hired-bg: rgba(21, 128, 61, 0.1);
+
+  --color-scrollbar-track: transparent;
+  --color-scrollbar-thumb: rgba(24, 95, 165, 0.28);
+  --color-scrollbar-thumb-hover: rgba(24, 95, 165, 0.42);
+}
+
+.dark {
+  --color-primary-600: #378add;
+  --color-primary-500: #4a9ef0;
+  --color-primary-700: #2a7bc8;
+
+  --color-bg: #0d1b2a;
+  --color-surface: #132433;
+  --color-surface-muted: #0c447c;
+  --color-border: #1a3350;
+  --color-text: #85b7eb;
+  --color-text-secondary: #85b7eb;
+  --color-text-muted: #6b9fd4;
+  --color-heading: #e6f1fb;
+  --color-link: #85b7eb;
+
+  --wordmark-gradient: linear-gradient(100deg, #e6f1fb 0%, #b8d4f0 45%, #378add 100%);
+
+  --color-nav-bg: var(--color-surface);
+  --color-nav-border: var(--color-border);
+  --color-nav-inset-line: rgba(255, 255, 255, 0.05);
+  --color-nav-drawer-shadow: rgba(0, 0, 0, 0.4);
+  --color-nav-label: var(--color-text-muted);
+  --color-nav-link: var(--color-text);
+  --color-nav-link-hover: rgba(230, 241, 251, 0.06);
+  --color-nav-wordmark: var(--color-heading);
+  --color-nav-icon-button-hover: rgba(230, 241, 251, 0.08);
+  --color-nav-focus-ring: rgba(133, 183, 235, 0.45);
+  --color-nav-overlay: rgba(4, 44, 83, 0.55);
+  --color-nav-active-border: var(--color-primary-400);
+
+  --color-accent-fill: #0c447c;
+
+  --color-btn-primary: #378add;
+  --color-btn-primary-hover: #4a9ef0;
+  --color-btn-ghost-fg: #e6f1fb;
+  --color-btn-ghost-hover-bg: #0c447c;
+
+  --color-info: #378add;
+
+  --color-scrollbar-track: transparent;
+  --color-scrollbar-thumb: rgba(133, 183, 235, 0.28);
+  --color-scrollbar-thumb-hover: rgba(133, 183, 235, 0.45);
+}
+
+/* Sidebar nav: same scrollbar as rest of app (`index.css` * rules); only stable gutter here. */
+.app-sidebar nav {
+  scrollbar-gutter: stable;
+}
+
+/*
+ * Login route only: always the same “white marketing + navy form” look.
+ * Re-declares tokens on this subtree so html.dark / theme toggle does not affect it.
+ */
+.login-page-static {
+  --color-primary-900: #042c53;
+  --color-primary-800: #0c447c;
+  --color-primary-700: #144a80;
+  --color-primary-600: #185fa5;
+  --color-primary-500: #2e7bdc;
+  --color-primary-400: #378add;
+
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-muted: #e6f1fb;
+  --color-border: #dbe4ec;
+  --color-text: #333333;
+  --color-text-secondary: #5c5c5c;
+  --color-text-muted: #737373;
+  --color-heading: #042c53;
+  --color-link: #185fa5;
+  --color-accent-fill: #e6f1fb;
+
+  --wordmark-gradient: linear-gradient(100deg, #042c53 0%, #185fa5 45%, #2e7bdc 100%);
+
+  --login-rail-subtle: rgba(230, 241, 251, 0.82);
+  --login-rail-subtle-faint: rgba(230, 241, 251, 0.55);
+}
+
+/* Client onboarding detail — active step gradient pulse */
+@keyframes co-step-gradient-shift {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.72;
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 1;
+  }
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.72;
+  }
+}
+
+@keyframes co-step-top-glow {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.co-step-active-gradient {
+  background: linear-gradient(
+    120deg,
+    rgba(24, 95, 165, 0.28) 0%,
+    rgba(46, 123, 220, 0.42) 35%,
+    rgba(55, 138, 221, 0.38) 65%,
+    rgba(24, 95, 165, 0.28) 100%
+  );
+  background-size: 220% 220%;
+  animation: co-step-gradient-shift 2.4s ease-in-out infinite;
+}
+
+.co-step-active-top-line {
+  background: linear-gradient(90deg, transparent, #378add, #2e7bdc, #378add, transparent);
+  animation: co-step-top-glow 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .co-step-active-gradient,
+  .co-step-active-top-line {
+    animation: none;
+    opacity: 1;
+  }
+}

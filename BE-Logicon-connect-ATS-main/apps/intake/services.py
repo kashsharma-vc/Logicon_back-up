@@ -1,0 +1,617 @@
+"""
+apps/intake/services.py
+
+Intake submission business logic:
+  normalize_mobile, get_or_create_candidate, detect_duplicate_submission,
+  create_intake_submission, create_intake_documents.
+"""
+
+import re
+from pathlib import Path
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
+
+from django.db import IntegrityError, connection, transaction
+from django.db.models import Q
+from django.utils import timezone
+from rest_framework import serializers
+
+from apps.talent.models import Candidate, CandidateSkill
+from .models import (
+    IntakeSubmission,
+    IntakeSubmissionAnswer,
+    IntakeDocument,
+    FormField,
+    FormTemplateField,
+)
+
+
+# Constants
+
+_FAKE_NUMBERS = {'0000000000', '1111111111', '1234567890', '9999999999'}
+_ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'}
+_ALLOWED_CONTENT_TYPES = {
+    'application/pdf',
+    'application/x-pdf',
+    'application/msword',
+    'application/doc',
+    'application/x-msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'image/jpeg',
+    'image/jpg',
+    'image/pjpeg',
+    'image/png',
+    'image/x-png',
+    'text/plain',
+    'application/octet-stream',
+    'binary/octet-stream',
+}
+MAX_FILES_PER_SUBMISSION = 5
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+
+
+# Normalization
+
+def normalize_mobile(mobile: str) -> str:
+    mobile = mobile.strip().replace(' ', '').replace('-', '')
+    if mobile.startswith('+91'):
+        mobile = mobile[3:]
+    elif mobile.startswith('91') and len(mobile) == 12:
+        mobile = mobile[2:]
+    return mobile
+
+
+def validate_mobile(value: str) -> str:
+    normalized = normalize_mobile(value)
+    if not re.match(r'^[6-9]\d{9}$', normalized):
+        raise serializers.ValidationError("Enter a valid 10-digit Indian mobile number.")
+    if normalized in _FAKE_NUMBERS:
+        raise serializers.ValidationError("Please enter a valid mobile number.")
+    return normalized
+
+
+def normalize_role_title(title: str) -> str:
+    return ' '.join(title.strip().lower().split())
+
+
+# Candidate get-or-create
+
+def get_or_create_candidate(org, phone_normalized: str, first_name: str,
+                             middle_name: str, last_name: str):
+    """
+    Get or create a talent.Candidate by (org, phone_normalized).
+    Updates name fields on re-submission.
+    """
+    defaults = {
+        'phone': phone_normalized,
+        'first_name': first_name or 'Unknown',
+        'last_name': last_name or 'Unknown',
+        'middle_name': middle_name or '',
+        'source': 'qr',
+    }
+    try:
+        candidate, created = Candidate.objects.get_or_create(
+            org=org,
+            phone_normalized=phone_normalized,
+            defaults=defaults,
+        )
+    except IntegrityError:
+        candidate = Candidate.objects.get(org=org, phone_normalized=phone_normalized)
+        created = False
+
+    if not created and (first_name or last_name):
+        update_fields = []
+        if first_name and candidate.first_name != first_name:
+            candidate.first_name = first_name
+            update_fields.append('first_name')
+        if middle_name and candidate.middle_name != middle_name:
+            candidate.middle_name = middle_name
+            update_fields.append('middle_name')
+        if last_name and candidate.last_name != last_name:
+            candidate.last_name = last_name
+            update_fields.append('last_name')
+        if update_fields:
+            candidate.save(update_fields=update_fields)
+
+    return candidate, created
+
+
+def _answer_value_by_key(answers_data: list) -> dict:
+    values = {}
+    for ans in answers_data or []:
+        field_obj = ans.get('field') or ans.get('template_field')
+        if not field_obj:
+            continue
+        values[field_obj.field_key] = ans.get('value')
+    return values
+
+
+def _first_answer_value(values: dict, *keys):
+    for key in keys:
+        value = values.get(key)
+        if value not in ('', None, []):
+            return value
+    return None
+
+
+def _decimal_or_none(value):
+    if value in ('', None, []):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _split_skill_values(value) -> list[str]:
+    if value in ('', None, []):
+        return []
+    if isinstance(value, list):
+        raw_parts = value
+    else:
+        raw_parts = re.split(r'[,;\n|]+', str(value))
+    skills = []
+    for part in raw_parts:
+        cleaned = str(part).strip()
+        if cleaned:
+            skills.append(cleaned)
+    return skills
+
+
+def _sync_candidate_from_submission(candidate, submission, answers_data: list) -> None:
+    """
+    Promote known QR intake fields into the talent profile.
+
+    Dynamic form answers remain the submission audit source; this only fills
+    stable candidate fields used by resume-pool search and demand matching.
+    """
+    values = _answer_value_by_key(answers_data)
+    updates = {}
+
+    if submission.other_role_title:
+        role_name = submission.other_role_title.strip()
+        if not candidate.current_role:
+            updates['current_role'] = role_name
+        from apps.jobs.models import JobRole
+        from django.utils.text import slugify
+        existing_role = JobRole.objects.filter(
+            Q(org=submission.campaign.org) | Q(org__isnull=True),
+            name__iexact=role_name,
+        ).first()
+        if not existing_role:
+            base_code = slugify(role_name)[:55] or 'role'
+            code = base_code
+            counter = 1
+            while JobRole.objects.filter(Q(org=submission.campaign.org) | Q(org__isnull=True), code=code).exists():
+                code = f"{base_code[:50]}_{counter}"
+                counter += 1
+            existing_role = JobRole.objects.create(
+                org=submission.campaign.org,
+                name=role_name,
+                code=code,
+                is_active=True,
+            )
+        if not submission.job_role_id:
+            submission.job_role = existing_role
+            submission.save(update_fields=['job_role'])
+        if not candidate.target_job_role_id:
+            updates['target_job_role'] = existing_role
+    elif submission.job_role_id:
+        if not candidate.target_job_role_id:
+            updates['target_job_role'] = submission.job_role
+        if not candidate.current_role:
+            updates['current_role'] = submission.job_role.name
+    if not candidate.source_reference:
+        updates['source_reference'] = f'qr_campaign:{submission.campaign_id}:submission:{submission.pk}'
+
+    email = _first_answer_value(values, 'email', 'email_id', 'candidate_email')
+    if email and not candidate.email:
+        updates['email'] = str(email).strip()
+
+    location = _first_answer_value(
+        values,
+        'current_location',
+        'location',
+        'city',
+        'preferred_location',
+    )
+    if location and not candidate.current_location:
+        updates['current_location'] = str(location).strip()
+
+    pref_location = _first_answer_value(values, 'preferred_location', 'preferred_city')
+    if pref_location and not candidate.preferred_location:
+        updates['preferred_location'] = str(pref_location).strip()
+
+    availability = _first_answer_value(values, 'joining_availability', 'available_from', 'availability_date')
+    if availability and getattr(candidate, 'availability_status', 'unknown') == 'unknown':
+        try:
+            from django.utils.dateparse import parse_date
+            parsed = parse_date(str(availability).strip())
+            if parsed:
+                updates['availability_status'] = 'available_from_date'
+        except Exception:
+            pass
+
+    experience = _decimal_or_none(
+        _first_answer_value(
+            values,
+            'total_experience_years',
+            'experience_years',
+            'experience',
+            'years_experience',
+        )
+    )
+    if experience is not None and candidate.total_experience_years is None:
+        updates['total_experience_years'] = experience
+
+    if updates:
+        for field, value in updates.items():
+            setattr(candidate, field, value)
+        candidate.save(update_fields=list(updates.keys()) + ['updated_at'])
+
+    skill_value = _first_answer_value(values, 'skills', 'skill', 'known_skills')
+    for skill in _split_skill_values(skill_value):
+        normalized = skill.lower()
+        CandidateSkill.objects.get_or_create(
+            candidate=candidate,
+            normalized_skill_name=normalized,
+            defaults={
+                'skill_name': skill,
+                'source': 'qr_intake',
+            },
+        )
+
+
+# Duplicate detection
+
+def detect_duplicate_submission(candidate, campaign, job_role,
+                                 other_role_title_normalized='') -> tuple:
+    """
+    Returns (is_duplicate, reason_str).
+    A duplicate is a submission from the same candidate within 24h for the
+    same campaign+role combination.
+    """
+    threshold = timezone.now() - timedelta(hours=24)
+    qs = IntakeSubmission.objects.filter(
+        candidate=candidate,
+        campaign=campaign,
+        submitted_at__gte=threshold,
+    )
+    if job_role:
+        qs = qs.filter(job_role=job_role, other_role_title_normalized='')
+    else:
+        qs = qs.filter(job_role__isnull=True,
+                       other_role_title_normalized=other_role_title_normalized)
+
+    if qs.exists():
+        if job_role:
+            reason = "Same mobile submitted for same campaign and role within 24 hours"
+        else:
+            reason = (
+                f"Same mobile submitted for 'Other: {other_role_title_normalized}' "
+                "within 24 hours"
+            )
+        return True, reason
+    return False, ''
+
+
+# File validation
+
+def validate_submission_file(uploaded_file):
+    ext = Path(uploaded_file.name).suffix.lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise serializers.ValidationError(
+            f"File '{uploaded_file.name}' has an unsupported file type ({ext}). Allowed types: PDF, DOC, DOCX, JPG, PNG."
+        )
+    ct = (getattr(uploaded_file, 'content_type', '') or '').split(';')[0].strip().lower()
+    if ct and ct not in _ALLOWED_CONTENT_TYPES and not ct.startswith('image/') and not ct.startswith('application/'):
+        raise serializers.ValidationError(
+            f"File '{uploaded_file.name}' has an unsupported content type."
+        )
+    if uploaded_file.size > MAX_UPLOAD_SIZE_BYTES:
+        raise serializers.ValidationError(
+            f"File '{uploaded_file.name}' exceeds the 10 MB limit."
+        )
+    return uploaded_file
+
+
+def _iter_uploaded_files(files):
+    all_files = []
+    for field_name in files:
+        for f in files.getlist(field_name):
+            all_files.append((field_name, f))
+    return all_files
+
+
+def validate_submission_documents(campaign, job_role, files) -> None:
+    all_files = _iter_uploaded_files(files)
+
+    if len(all_files) > MAX_FILES_PER_SUBMISSION:
+        raise serializers.ValidationError(
+            f"A maximum of {MAX_FILES_PER_SUBMISSION} files can be uploaded."
+        )
+
+    for _, f in all_files:
+        validate_submission_file(f)
+
+    provided_names = {field_name for field_name, _ in all_files}
+    missing = []
+
+    if campaign.form_template_id:
+        required_file_fields = FormTemplateField.objects.filter(
+            section__template=campaign.form_template,
+            is_active=True,
+            is_required=True,
+            field_type='file',
+        ).filter(Q(role__isnull=True) | Q(role=job_role))
+        for field in required_file_fields:
+            allowed_names = {field.field_key, f'template_field_{field.id}'}
+            key_l = (field.field_key or '').lower()
+            lbl_l = (field.label or '').lower()
+            if 'resume' in key_l or 'cv' in key_l or 'resume' in lbl_l or 'cv' in lbl_l:
+                allowed_names.add('resume')
+            if not provided_names.intersection(allowed_names):
+                missing.append(field.label)
+    else:
+        required_file_fields = FormField.objects.filter(
+            campaign=campaign,
+            is_active=True,
+            is_required=True,
+            field_type='file',
+        ).filter(Q(role__isnull=True) | Q(role=job_role))
+        for field in required_file_fields:
+            allowed_names = {field.field_key, f'field_{field.id}', f'file_{field.id}'}
+            key_l = (field.field_key or '').lower()
+            lbl_l = (field.label or '').lower()
+            if 'resume' in key_l or 'cv' in key_l or 'resume' in lbl_l or 'cv' in lbl_l:
+                allowed_names.add('resume')
+            if not provided_names.intersection(allowed_names):
+                missing.append(field.label)
+
+    if missing:
+        raise serializers.ValidationError(
+            f"Required documents missing: {', '.join(missing)}."
+        )
+
+
+def _document_type_from_field_name(
+    field_name: str, campaign_field=None, tmpl_field=None, filename: str = ''
+) -> str:
+    n = (field_name or '').lower()
+    if n == 'resume' or 'resume' in n or 'cv' in n:
+        return 'resume'
+    if n in {'id_proof', 'idproof', 'identity'} or 'id_proof' in n or 'idproof' in n or 'aadhaar' in n or 'pan' in n:
+        return 'id_proof'
+    if n in {'certificate', 'certificates'} or 'certificate' in n:
+        return 'certificate'
+
+    field_obj = campaign_field or tmpl_field
+    if field_obj:
+        key = (getattr(field_obj, 'field_key', '') or '').lower()
+        label = (getattr(field_obj, 'label', '') or '').lower()
+        if 'resume' in key or 'cv' in key or 'resume' in label or 'cv' in label:
+            return 'resume'
+        if any(w in key or w in label for w in ('id_proof', 'idproof', 'identity', 'aadhaar', 'pan', 'voter')):
+            return 'id_proof'
+        if any(w in key or w in label for w in ('certificate', 'qualification', 'degree', 'diploma')):
+            return 'certificate'
+
+    fn = (filename or '').lower()
+    if 'resume' in fn or 'cv' in fn:
+        return 'resume'
+
+    return 'other'
+
+
+def _get_field_fk_for_file(submission, field_name: str):
+    """
+    Returns (campaign_field_or_none, template_field_or_none).
+    Checks template_field_ prefix first, then campaign field_ / file_ prefixes.
+    """
+    if field_name.startswith('template_field_'):
+        raw_id = field_name[len('template_field_'):]
+        if raw_id.isdigit() and submission.campaign.form_template_id:
+            tmpl_field = FormTemplateField.objects.filter(
+                id=int(raw_id),
+                section__template=submission.campaign.form_template,
+                field_type='file',
+                is_active=True,
+            ).first()
+            if tmpl_field:
+                return None, tmpl_field
+    for prefix in ('field_', 'file_'):
+        if field_name.startswith(prefix):
+            raw_id = field_name[len(prefix):]
+            if raw_id.isdigit():
+                campaign_field = submission.campaign.form_fields.filter(
+                    id=int(raw_id), field_type='file', is_active=True,
+                ).first()
+                if campaign_field:
+                    return campaign_field, None
+    field = submission.campaign.form_fields.filter(
+        field_key=field_name,
+        field_type='file',
+        is_active=True,
+    ).first()
+    if field:
+        return field, None
+    return None, None
+
+
+# Submission creation
+
+def _get_client_ip(request) -> str:
+    xff = request.META.get('HTTP_X_FORWARDED_FOR')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', '')
+
+
+@transaction.atomic
+def create_intake_submission(validated_data: dict, request=None) -> IntakeSubmission:
+    """
+    Core submission creation service.
+    validated_data comes from SubmissionCreateSerializer.validate().
+    """
+    campaign = validated_data['campaign']
+    job_role = validated_data.get('job_role')
+    other_role_title = validated_data.get('other_role_title', '').strip()
+    other_role_title_normalized = normalize_role_title(other_role_title) if other_role_title else ''
+
+    first_name = validated_data.get('first_name', '').strip()
+    middle_name = validated_data.get('middle_name', '').strip()
+    last_name = validated_data.get('last_name', '').strip()
+    full_name = ' '.join(p for p in [first_name, middle_name, last_name] if p)
+
+    mobile_raw = validated_data['mobile_number']
+    mobile_normalized = normalize_mobile(mobile_raw)
+
+    candidate, _ = get_or_create_candidate(
+        org=campaign.org,
+        phone_normalized=mobile_normalized,
+        first_name=first_name,
+        middle_name=middle_name,
+        last_name=last_name,
+    )
+
+    if connection.vendor != 'sqlite':
+        candidate = Candidate.objects.select_for_update().get(pk=candidate.pk)
+
+    is_duplicate, duplicate_reason = detect_duplicate_submission(
+        candidate, campaign, job_role, other_role_title_normalized,
+    )
+
+    if is_duplicate and not campaign.allow_duplicates:
+        raise serializers.ValidationError(
+            "You have already submitted an application for this role within the last 24 hours."
+        )
+
+    ip_address = _get_client_ip(request) if request else None
+    user_agent = (request.META.get('HTTP_USER_AGENT', '') if request else '')[:1024]
+
+    submission = IntakeSubmission.objects.create(
+        campaign=campaign,
+        site=campaign.site,
+        candidate=candidate,
+        job_role=job_role,
+        first_name=first_name,
+        middle_name=middle_name,
+        last_name=last_name,
+        full_name=full_name,
+        other_role_title=other_role_title,
+        other_role_title_normalized=other_role_title_normalized,
+        mobile_number=mobile_raw,
+        mobile_number_normalized=mobile_normalized,
+        language=validated_data.get('language', campaign.default_language),
+        is_possible_duplicate=is_duplicate,
+        duplicate_reason=duplicate_reason,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+    answers_data = validated_data.get('answers', [])
+    _sync_candidate_from_submission(candidate, submission, answers_data)
+    if answers_data:
+        bulk_answers = []
+        for ans in answers_data:
+            campaign_field = ans.get('field')
+            tmpl_field = ans.get('template_field')
+            field_obj = campaign_field or tmpl_field
+            bulk_answers.append(IntakeSubmissionAnswer(
+                submission=submission,
+                field=campaign_field,
+                template_field=tmpl_field,
+                field_source=ans.get('field_source', 'campaign'),
+                field_label_snapshot=field_obj.label if field_obj else '',
+                field_type_snapshot=field_obj.field_type if field_obj else '',
+                value=ans['value'],
+            ))
+        IntakeSubmissionAnswer.objects.bulk_create(bulk_answers)
+
+    return submission
+
+
+def _link_resume_if_needed(doc: IntakeDocument, candidate) -> None:
+    """If doc is a resume document, ensure exactly one talent.Resume exists for it."""
+    if doc.document_type != 'resume':
+        return
+    from apps.talent.models import Resume
+    from apps.talent.services import compute_file_hash, determine_document_type, queue_resume_processing
+
+    file_hash = ''
+    try:
+        file_hash = compute_file_hash(doc.file)
+    except Exception:
+        pass
+
+    try:
+        resume, created = Resume.objects.get_or_create(
+            source_intake_document=doc,
+            defaults={
+                'candidate': candidate,
+                'file': doc.file,
+                'original_filename': doc.original_filename,
+                'content_type': doc.content_type,
+                'size_bytes': doc.size_bytes,
+                'source_type': 'qr_intake',
+                'status': 'uploaded',
+                'file_hash': file_hash,
+                'document_type': determine_document_type(doc.original_filename, doc.content_type),
+                'target_job_role': doc.submission.job_role,
+                'target_role_source': 'qr_intake' if doc.submission.job_role_id else '',
+            },
+        )
+
+        if not created:
+            updates = {}
+            document_type = determine_document_type(doc.original_filename, doc.content_type)
+            if resume.document_type in ('', 'unknown') and document_type != 'unknown':
+                updates['document_type'] = document_type
+            if not resume.target_job_role_id and doc.submission.job_role_id:
+                updates['target_job_role'] = doc.submission.job_role
+                updates['target_role_source'] = 'qr_intake'
+            if updates:
+                Resume.objects.filter(pk=resume.pk).update(**updates)
+
+        if created:
+            queue_resume_processing(resume)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Failed to link resume for doc %s", doc.pk)
+
+
+def create_intake_documents(submission: IntakeSubmission, files) -> list:
+    validate_submission_documents(submission.campaign, submission.job_role, files)
+    all_files = _iter_uploaded_files(files)
+
+    documents = []
+    has_resume_doc = False
+    for field_name, f in all_files:
+        campaign_field, tmpl_field = _get_field_fk_for_file(submission, field_name)
+        doc_type = _document_type_from_field_name(
+            field_name, campaign_field=campaign_field, tmpl_field=tmpl_field, filename=f.name,
+        )
+        if doc_type == 'resume':
+            has_resume_doc = True
+
+        doc = IntakeDocument.objects.create(
+            submission=submission,
+            field=campaign_field,
+            template_field=tmpl_field,
+            field_source='template' if tmpl_field else 'campaign',
+            document_type=doc_type,
+            file=f,
+            original_filename=f.name,
+            content_type=getattr(f, 'content_type', ''),
+            size_bytes=f.size,
+        )
+        _link_resume_if_needed(doc, submission.candidate)
+        documents.append(doc)
+
+    if not has_resume_doc and len(documents) == 1:
+        single_doc = documents[0]
+        single_doc.document_type = 'resume'
+        single_doc.save(update_fields=['document_type', 'updated_at'])
+        _link_resume_if_needed(single_doc, submission.candidate)
+
+    return documents
