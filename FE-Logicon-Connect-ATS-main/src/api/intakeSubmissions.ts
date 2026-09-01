@@ -1,4 +1,4 @@
-﻿import { api } from '@/api/client'
+import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
 import type { IntakeSubmissionDetail, IntakeSubmissionRow } from '@/features/intakeSubmissions/types'
 
@@ -9,6 +9,8 @@ export interface ListIntakeSubmissionsParams {
   job_role?: number
   language?: string
   is_possible_duplicate?: boolean
+  from_date?: string
+  to_date?: string
   page?: number
 }
 

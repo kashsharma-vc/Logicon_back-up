@@ -8,18 +8,30 @@ def is_invalid_role_name(name: str) -> bool:
     if not name:
         return True
     s = str(name).strip()
-    # Reject email addresses
-    if '@' in s or re.search(r'@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', s):
+    # Reject email addresses and domain names
+    if '@' in s or re.search(r'@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', s) or re.search(r'\.(?:com|in|org|net)$', s, re.IGNORECASE):
         return True
-    # Reject dates or timestamps
-    if '00:00:00' in s or re.search(r'\d{4}-\d{2}-\d{2}', s) or re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', s):
+    # Reject dates or timestamps (e.g., 2026-07-09, 09/07/2026, 09-Jul-2026, 00:00:00)
+    if (
+        '00:00:00' in s or
+        re.search(r'\d{4}-\d{2}-\d{2}', s) or
+        re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', s) or
+        re.search(r'\d{1,2}[-\s](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-\s]\d{2,4}', s, re.IGNORECASE) or
+        re.search(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-\s]\d{2,4}', s, re.IGNORECASE)
+    ):
         return True
     # Reject mostly numeric strings / phone numbers
     digits = ''.join(filter(str.isdigit, s))
-    if len(digits) >= 8 and (len(digits) / max(1, len(s)) > 0.6):
+    if len(digits) >= 7 and (len(digits) / max(1, len(s)) > 0.5):
         return True
     # Reject URLs
     if s.startswith('http://') or s.startswith('https://') or s.startswith('www.'):
+        return True
+    # Reject address patterns (e.g., 6 NO HUT, Flat 102, Room 4)
+    if (
+        re.search(r'^\d+\s+(?:no|hut|room|flat|plot|block|sector|chawl|nagar)\b', s, re.IGNORECASE) or
+        re.search(r'^(?:hut|room|flat|plot|block|house)\s*(?:no\.?|#)?\s*\d+', s, re.IGNORECASE)
+    ):
         return True
     # Reject excessively long strings (> 70 chars)
     if len(s) > 70:

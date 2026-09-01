@@ -198,7 +198,28 @@ class IntakeSubmissionViewSet(ScopedModelViewSet):
         'list':           'submission.read',
         'retrieve':       'submission.read',
         'partial_update': 'submission.update',
+        'export':         'submission.read',
     }
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        from_date = params.get('from_date') or params.get('date_from')
+        if from_date:
+            try:
+                qs = qs.filter(submitted_at__date__gte=from_date)
+            except Exception:
+                pass
+
+        to_date = params.get('to_date') or params.get('date_to')
+        if to_date:
+            try:
+                qs = qs.filter(submitted_at__date__lte=to_date)
+            except Exception:
+                pass
+
+        return qs
 
     def get_serializer_class(self):
         if self.action == 'partial_update':
@@ -218,6 +239,113 @@ class IntakeSubmissionViewSet(ScopedModelViewSet):
 
         out = IntakeSubmissionDetailSerializer(instance, context={'request': request})
         return Response(out.data)
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        """
+        GET /api/intake/submissions/export/
+        Export filtered intake submissions with dynamically discovered form field columns.
+        """
+        from django.http import StreamingHttpResponse
+        from datetime import datetime
+        import csv
+        import json
+
+        queryset = self.filter_queryset(self.get_queryset()).select_related(
+            'campaign', 'site', 'candidate', 'job_role',
+        ).prefetch_related('answers', 'documents')
+
+        submissions = list(queryset)
+
+        # Discover all unique dynamic form fields across the submissions
+        dynamic_field_labels = []
+        seen_labels = set()
+        for sub in submissions:
+            for ans in sub.answers.all():
+                label = (ans.field_label_snapshot or '').strip()
+                if label and label not in seen_labels:
+                    seen_labels.add(label)
+                    dynamic_field_labels.append(label)
+
+        headers = [
+            'Submission ID',
+            'Candidate Full Name',
+            'First Name',
+            'Middle Name',
+            'Last Name',
+            'Mobile Number',
+            'Campaign',
+            'Job Role',
+            'Status',
+            'Language',
+            'Is Duplicate',
+            'Duplicate Reason',
+            *dynamic_field_labels,
+            'Uploaded Documents',
+            'Submitted At',
+        ]
+
+        class Echo:
+            def write(self, value):
+                return value
+
+        def stream_csv():
+            pseudo_buffer = Echo()
+            writer = csv.writer(pseudo_buffer)
+            yield writer.writerow(headers)
+
+            for sub in submissions:
+                # Answer map
+                answer_map = {}
+                for ans in sub.answers.all():
+                    label = (ans.field_label_snapshot or '').strip()
+                    if label:
+                        val = ans.value
+                        if val is None:
+                            val_str = ''
+                        elif isinstance(val, bool):
+                            val_str = 'Yes' if val else 'No'
+                        elif isinstance(val, (list, dict)):
+                            val_str = json.dumps(val)
+                        else:
+                            val_str = str(val).strip()
+                        if label in answer_map:
+                            answer_map[label] = f"{answer_map[label]}; {val_str}"
+                        else:
+                            answer_map[label] = val_str
+
+                docs = ', '.join(d.original_filename or d.document_type for d in sub.documents.all()) or '—'
+                candidate_name = sub.full_name or ' '.join(filter(None, [sub.first_name, sub.middle_name, sub.last_name])) or '—'
+                role_name = sub.job_role.name if sub.job_role else (sub.other_role_title or '—')
+
+                row = [
+                    f"#{sub.pk}",
+                    candidate_name,
+                    sub.first_name or '',
+                    sub.middle_name or '',
+                    sub.last_name or '',
+                    sub.mobile_number_normalized or sub.mobile_number or '',
+                    sub.campaign.title or sub.campaign.name,
+                    role_name,
+                    sub.get_status_display() if hasattr(sub, 'get_status_display') else sub.status,
+                    (sub.language or 'en').upper(),
+                    'Yes' if sub.is_possible_duplicate else 'No',
+                    sub.duplicate_reason or '',
+                ]
+
+                for label in dynamic_field_labels:
+                    row.append(answer_map.get(label, ''))
+
+                row.append(docs)
+                row.append(sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if sub.submitted_at else '')
+
+                yield writer.writerow(row)
+
+        now_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"intake_submissions_export_{now_str}.csv"
+        response = StreamingHttpResponse(stream_csv(), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 # ─── Form Template ViewSets ───────────────────────────────────────────────────

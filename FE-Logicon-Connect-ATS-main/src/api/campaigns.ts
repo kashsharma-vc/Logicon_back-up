@@ -1,4 +1,4 @@
-﻿import { api } from '@/api/client'
+import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
 import type { CampaignRow, CampaignWriteInput } from '@/features/campaigns/types'
 

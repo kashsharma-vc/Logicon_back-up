@@ -16,6 +16,7 @@ interface SearchableSelectProps {
   placeholder?: string
   searchPlaceholder?: string
   className?: string
+  disabled?: boolean
 }
 
 export function SearchableSelect({
@@ -27,6 +28,7 @@ export function SearchableSelect({
   placeholder = 'Select option...',
   searchPlaceholder = 'Search...',
   className,
+  disabled,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -68,17 +70,18 @@ export function SearchableSelect({
   const totalCount = options.filter((o) => o.value).length
 
   return (
-    <div className={cn('relative w-full', className)} ref={containerRef}>
+    <div className={cn('relative flex flex-col gap-1 w-full', className)} ref={containerRef}>
       {label && (
-        <label htmlFor={id} className="mb-1 block text-xs font-semibold uppercase tracking-widest text-app-subtle">
+        <label htmlFor={id} className="text-sm font-medium text-app-secondary">
           {label}
         </label>
       )}
       <button
         id={id}
         type="button"
+        disabled={disabled}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-panel border border-app-border bg-app-surface px-3 py-2 text-left text-sm text-app-text shadow-panel focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-panel border border-app-border bg-app-surface px-3 py-2 text-left text-sm text-app-text shadow-panel focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:pointer-events-none disabled:opacity-50"
       >
         <span className={cn('truncate', !selectedOption && 'text-app-subtle')}>
           {selectedOption ? selectedOption.label : placeholder}
