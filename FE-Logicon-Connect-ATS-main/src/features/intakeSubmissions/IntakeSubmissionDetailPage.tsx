@@ -209,17 +209,19 @@ export function IntakeSubmissionDetailPage() {
             <div className="rounded-panel border border-app-border bg-app-muted p-3">
               <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Campaign</p>
               <p className="mt-1 text-sm font-semibold text-app-text">
-                {campaignLabelById.get(row.campaign) ?? `Campaign #${row.campaign}`}
+                {row.campaign_title || row.campaign_name || campaignLabelById.get(row.campaign) || `Campaign #${row.campaign}`}
               </p>
             </div>
             <div className="rounded-panel border border-app-border bg-app-muted p-3">
               <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Role</p>
               <p className="mt-1 text-sm font-semibold text-app-text">
-                {row.job_role
-                  ? roleLabelById.get(row.job_role) ?? `Role #${row.job_role}`
-                  : row.other_role_title
-                    ? `Other: ${row.other_role_title}`
-                    : '—'}
+                {row.job_role_name
+                  ? row.job_role_name
+                  : row.job_role
+                    ? roleLabelById.get(row.job_role) ?? `Role #${row.job_role}`
+                    : row.other_role_title
+                      ? `Other: ${row.other_role_title}`
+                      : '—'}
               </p>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-panel border border-app-border bg-app-muted p-3">

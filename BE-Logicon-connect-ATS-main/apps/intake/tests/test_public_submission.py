@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps/intake/tests/test_public_submission.py
 
 Tests for POST /api/public/submissions/
@@ -105,6 +105,8 @@ class TestPublicSubmission(TestCase):
         )
 
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         self.api = APIClient()
         self.valid_payload = {
             'campaign_token': self.campaign.token,
@@ -445,3 +447,61 @@ class TestPublicSubmission(TestCase):
         resp2 = self._post(payload1)
         self.assertEqual(resp2.status_code, 400)
         self.assertIn('already submitted', str(resp2.data).lower())
+
+    def test_duplicate_blocked_by_same_email_when_allow_duplicates_false(self):
+        strict_campaign = QRCampaign.objects.create(
+            org=self.org, site=self.site,
+            name='Strict Email Campaign', title='Strict Email',
+            code='STRICT-EMAIL',
+            is_active=True, allow_duplicates=False,
+            default_language='en', enabled_languages=['en'],
+        )
+        CampaignJobRole.objects.create(
+            campaign=strict_campaign, job_role=self.job_role, is_active=True,
+        )
+        email_field = FormField.objects.create(
+            campaign=strict_campaign, role=None,
+            label='Email Address', field_key='email', field_type='email',
+            sort_order=0, is_required=True, is_active=True, options=[],
+        )
+        payload1 = {
+            'campaign_token': strict_campaign.token,
+            'job_role_id': self.job_role.id,
+            'first_name': 'Candidate',
+            'last_name': 'One',
+            'mobile_number': '9111111111',
+            'answers': [{'field_id': email_field.id, 'value': 'candidate.one@example.com'}],
+        }
+        resp1 = self._post(payload1)
+        self.assertEqual(resp1.status_code, 201)
+
+        # Attempt to apply with different phone number but same email
+        payload2 = {
+            'campaign_token': strict_campaign.token,
+            'job_role_id': self.job_role.id,
+            'first_name': 'Candidate',
+            'last_name': 'Two',
+            'mobile_number': '9222222222',
+            'answers': [{'field_id': email_field.id, 'value': 'candidate.one@example.com'}],
+        }
+        resp2 = self._post(payload2)
+        self.assertEqual(resp2.status_code, 400)
+        self.assertIn('already submitted', str(resp2.data).lower())
+
+    def test_submission_serializers_include_job_role_and_campaign_info(self):
+        from apps.intake.serializers import IntakeSubmissionListSerializer, IntakeSubmissionDetailSerializer
+        resp = self._post(self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        sub = IntakeSubmission.objects.get(pk=resp.data['id'])
+
+        list_data = IntakeSubmissionListSerializer(sub).data
+        self.assertEqual(list_data['job_role_name'], self.job_role.name)
+        self.assertEqual(list_data['job_role_code'], self.job_role.code)
+        self.assertEqual(list_data['campaign_name'], self.campaign.name)
+        self.assertEqual(list_data['campaign_title'], self.campaign.title)
+
+        detail_data = IntakeSubmissionDetailSerializer(sub).data
+        self.assertEqual(detail_data['job_role_name'], self.job_role.name)
+        self.assertEqual(detail_data['job_role_code'], self.job_role.code)
+        self.assertEqual(detail_data['campaign_name'], self.campaign.name)
+        self.assertEqual(detail_data['campaign_title'], self.campaign.title)

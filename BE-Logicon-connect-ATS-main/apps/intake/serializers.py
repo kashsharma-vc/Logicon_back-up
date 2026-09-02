@@ -204,10 +204,16 @@ class IntakeDocumentSerializer(serializers.ModelSerializer):
 
 class IntakeSubmissionListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for submission list view."""
+    job_role_name = serializers.CharField(source='job_role.name', read_only=True, allow_null=True)
+    job_role_code = serializers.CharField(source='job_role.code', read_only=True, allow_null=True)
+    campaign_name = serializers.CharField(source='campaign.name', read_only=True, allow_null=True)
+    campaign_title = serializers.CharField(source='campaign.title', read_only=True, allow_null=True)
+
     class Meta:
         model = IntakeSubmission
         fields = [
-            'id', 'campaign', 'site', 'candidate', 'job_role',
+            'id', 'campaign', 'campaign_name', 'campaign_title', 'site', 'candidate',
+            'job_role', 'job_role_name', 'job_role_code',
             'first_name', 'middle_name', 'last_name', 'full_name',
             'other_role_title', 'mobile_number', 'mobile_number_normalized',
             'status', 'language', 'is_possible_duplicate',
@@ -218,13 +224,18 @@ class IntakeSubmissionListSerializer(serializers.ModelSerializer):
 
 class IntakeSubmissionDetailSerializer(serializers.ModelSerializer):
     """Full detail serializer including answers, documents, and metadata."""
+    job_role_name = serializers.CharField(source='job_role.name', read_only=True, allow_null=True)
+    job_role_code = serializers.CharField(source='job_role.code', read_only=True, allow_null=True)
+    campaign_name = serializers.CharField(source='campaign.name', read_only=True, allow_null=True)
+    campaign_title = serializers.CharField(source='campaign.title', read_only=True, allow_null=True)
     answers = IntakeSubmissionAnswerSerializer(many=True, read_only=True)
     documents = IntakeDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = IntakeSubmission
         fields = [
-            'id', 'campaign', 'site', 'candidate', 'job_role',
+            'id', 'campaign', 'campaign_name', 'campaign_title', 'site', 'candidate',
+            'job_role', 'job_role_name', 'job_role_code',
             'first_name', 'middle_name', 'last_name', 'full_name',
             'other_role_title', 'mobile_number', 'mobile_number_normalized',
             'status', 'language', 'is_possible_duplicate', 'duplicate_reason',

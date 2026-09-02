@@ -262,12 +262,14 @@ export async function exportIntakeSubmissionsToExcel({
   const rowsData = detailedSubmissions.map((sub) => {
     const candidateName =
       sub.full_name || [sub.first_name, sub.middle_name, sub.last_name].filter(Boolean).join(' ') || '—'
-    const campaignName = campaignLabelById.get(sub.campaign) ?? `Campaign #${sub.campaign}`
-    const roleName = sub.job_role
-      ? roleLabelById.get(sub.job_role) ?? `Role #${sub.job_role}`
-      : sub.other_role_title
-        ? `Other: ${sub.other_role_title}`
-        : '—'
+    const campaignName = sub.campaign_title || sub.campaign_name || campaignLabelById.get(sub.campaign) || `Campaign #${sub.campaign}`
+    const roleName = sub.job_role_name
+      ? sub.job_role_name
+      : sub.job_role
+        ? roleLabelById.get(sub.job_role) ?? `Role #${sub.job_role}`
+        : sub.other_role_title
+          ? `Other: ${sub.other_role_title}`
+          : '—'
     const statusLabel = STATUS_LABELS[sub.status] || sub.status
     const submittedDateStr = sub.submitted_at ? new Date(sub.submitted_at).toLocaleString() : '—'
 

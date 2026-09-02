@@ -350,14 +350,16 @@ export function IntakeSubmissionsPage() {
               </p>
               <p className="truncate text-xs text-app-secondary">{r.mobile_number_normalized}</p>
               <p className="truncate text-xs text-app-subtle">
-                {campaignLabelById.get(r.campaign) ?? `Campaign #${r.campaign}`}
+                {r.campaign_title || r.campaign_name || campaignLabelById.get(r.campaign) || `Campaign #${r.campaign}`}
               </p>
               <p className="truncate text-xs text-app-subtle">
-                {r.job_role
-                  ? roleLabelById.get(r.job_role) ?? `Role #${r.job_role}`
-                  : r.other_role_title
-                    ? `Other: ${r.other_role_title}`
-                    : '-'}
+                {r.job_role_name
+                  ? r.job_role_name
+                  : r.job_role
+                    ? roleLabelById.get(r.job_role) ?? `Role #${r.job_role}`
+                    : r.other_role_title
+                      ? `Other: ${r.other_role_title}`
+                      : '-'}
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2">
@@ -583,14 +585,16 @@ export function IntakeSubmissionsPage() {
                     <TD className="py-2 text-sm text-app-text">{r.full_name || '—'}</TD>
                     <TD className="py-2 text-sm text-app-secondary">{r.mobile_number_normalized}</TD>
                     <TD className="py-2 text-sm text-app-secondary">
-                      {campaignLabelById.get(r.campaign) ?? `Campaign #${r.campaign}`}
+                      {r.campaign_title || r.campaign_name || campaignLabelById.get(r.campaign) || `Campaign #${r.campaign}`}
                     </TD>
                     <TD className="py-2 text-sm text-app-secondary">
-                      {r.job_role
-                        ? roleLabelById.get(r.job_role) ?? `Role #${r.job_role}`
-                        : r.other_role_title
-                          ? `Other: ${r.other_role_title}`
-                          : '—'}
+                      {r.job_role_name
+                        ? r.job_role_name
+                        : r.job_role
+                          ? roleLabelById.get(r.job_role) ?? `Role #${r.job_role}`
+                          : r.other_role_title
+                            ? `Other: ${r.other_role_title}`
+                            : '—'}
                     </TD>
                     <TD className="py-2">
                       <SubmissionStatusBadge status={r.status} />

@@ -110,6 +110,15 @@ export function ApplyPage() {
       setLoading(false)
       return
     }
+
+    try {
+      if (localStorage.getItem(`submitted_campaign_${token}`) === 'true') {
+        setSubmitted(true)
+      }
+    } catch {
+      // localStorage may fail in restricted browser mode; continue gracefully
+    }
+
     setLoading(true)
     setLoadError(null)
     getPublicCampaignByToken(token)
@@ -308,6 +317,11 @@ export function ApplyPage() {
     setSubmitting(true)
     try {
       const res = await createPublicSubmission(formData)
+      try {
+        localStorage.setItem(`submitted_campaign_${token}`, 'true')
+      } catch {
+        // ignore safely
+      }
       setDuplicate(Boolean(res.is_possible_duplicate))
       setSubmitted(true)
     } catch (e: unknown) {
@@ -374,10 +388,6 @@ export function ApplyPage() {
           lang={lang}
           campaignTitle={campaign.title}
           isDuplicate={duplicate}
-          onBack={() => {
-            setSubmitted(false)
-            setDuplicate(false)
-          }}
         />
       </PublicApplyLayout>
     )

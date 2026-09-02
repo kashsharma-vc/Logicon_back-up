@@ -10,9 +10,13 @@ export type SubmissionStatus =
 export interface IntakeSubmissionRow {
   id: number
   campaign: number
+  campaign_name?: string | null
+  campaign_title?: string | null
   site: number | null
   candidate: number
   job_role: number | null
+  job_role_name?: string | null
+  job_role_code?: string | null
   first_name: string
   middle_name: string
   last_name: string

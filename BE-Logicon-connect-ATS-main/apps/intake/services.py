@@ -205,7 +205,12 @@ def _sync_candidate_from_submission(candidate, submission, answers_data: list) -
         updates['source_reference'] = f'qr_campaign:{submission.campaign_id}:submission:{submission.pk}'
 
     email = _first_answer_value(values, 'email', 'email_id', 'candidate_email')
-    if email and not candidate.email:
+    if not email:
+        for val in values.values():
+            if isinstance(val, str) and '@' in val and '.' in val and len(val) >= 5:
+                email = val.strip()
+                break
+    if email and candidate.email != str(email).strip():
         updates['email'] = str(email).strip()
 
     location = _first_answer_value(
@@ -264,34 +269,46 @@ def _sync_candidate_from_submission(candidate, submission, answers_data: list) -
 
 # Duplicate detection
 
-def detect_duplicate_submission(candidate, campaign, job_role,
-                                 other_role_title_normalized='') -> tuple:
+def detect_duplicate_submission(candidate, campaign, job_role=None,
+                                 other_role_title_normalized='',
+                                 phone_normalized='',
+                                 email='') -> tuple:
     """
     Returns (is_duplicate, reason_str).
-    A duplicate is a submission from the same candidate within 24h for the
-    same campaign+role combination.
+    Checks for prior submissions from the same candidate, mobile number, or email on the campaign.
     """
-    threshold = timezone.now() - timedelta(hours=24)
-    qs = IntakeSubmission.objects.filter(
-        candidate=candidate,
-        campaign=campaign,
-        submitted_at__gte=threshold,
-    )
-    if job_role:
-        qs = qs.filter(job_role=job_role, other_role_title_normalized='')
-    else:
-        qs = qs.filter(job_role__isnull=True,
-                       other_role_title_normalized=other_role_title_normalized)
+    phone_norm = phone_normalized or (getattr(candidate, 'phone_normalized', None) if candidate else '')
 
-    if qs.exists():
-        if job_role:
-            reason = "Same mobile submitted for same campaign and role within 24 hours"
-        else:
-            reason = (
-                f"Same mobile submitted for 'Other: {other_role_title_normalized}' "
-                "within 24 hours"
-            )
-        return True, reason
+    base_qs = IntakeSubmission.objects.filter(campaign=campaign)
+    if campaign.allow_duplicates:
+        threshold = timezone.now() - timedelta(hours=24)
+        base_qs = base_qs.filter(submitted_at__gte=threshold)
+
+    # 1. Match by phone or candidate
+    phone_filter = Q()
+    if candidate and getattr(candidate, 'pk', None):
+        phone_filter |= Q(candidate=candidate)
+    if phone_norm:
+        phone_filter |= Q(mobile_number_normalized=phone_norm) | Q(candidate__phone_normalized=phone_norm)
+
+    phone_dup = base_qs.filter(phone_filter).exists() if phone_filter else False
+
+    # 2. Match by email
+    email_clean = (email or (getattr(candidate, 'email', None) if candidate else '') or '').strip().lower()
+    email_dup = False
+    if email_clean:
+        email_dup = base_qs.filter(
+            Q(candidate__email__iexact=email_clean) |
+            Q(answers__value__iexact=email_clean)
+        ).exists()
+
+    if phone_dup and email_dup:
+        return True, "Same mobile number and email ID already submitted for this campaign"
+    elif phone_dup:
+        return True, "Same mobile number already submitted for this campaign"
+    elif email_dup:
+        return True, "Same email ID already submitted for this campaign"
+
     return False, ''
 
 
@@ -474,16 +491,28 @@ def create_intake_submission(validated_data: dict, request=None) -> IntakeSubmis
         last_name=last_name,
     )
 
-    if connection.vendor != 'sqlite':
-        candidate = Candidate.objects.select_for_update().get(pk=candidate.pk)
+    answers_data = validated_data.get('answers', [])
+    values = _answer_value_by_key(answers_data)
+    email_val = _first_answer_value(values, 'email', 'email_id', 'candidate_email')
+    if not email_val:
+        for val in values.values():
+            if isinstance(val, str) and '@' in val and '.' in val and len(val) >= 5:
+                email_val = val.strip()
+                break
+    email_str = str(email_val).strip() if email_val else ''
 
     is_duplicate, duplicate_reason = detect_duplicate_submission(
-        candidate, campaign, job_role, other_role_title_normalized,
+        candidate=candidate,
+        campaign=campaign,
+        job_role=job_role,
+        other_role_title_normalized=other_role_title_normalized,
+        phone_normalized=mobile_normalized,
+        email=email_str,
     )
 
     if is_duplicate and not campaign.allow_duplicates:
         raise serializers.ValidationError(
-            "You have already submitted an application for this role within the last 24 hours."
+            "You have already submitted an application with this mobile number or email ID for this campaign."
         )
 
     ip_address = _get_client_ip(request) if request else None

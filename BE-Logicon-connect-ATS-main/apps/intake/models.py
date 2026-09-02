@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps/intake/models.py
 
 QRCampaign, CampaignJobRole, FormField, IntakeSubmission,
@@ -157,7 +157,7 @@ class QRCampaign(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
-    allow_duplicates = models.BooleanField(default=True)
+    allow_duplicates = models.BooleanField(default=False)
     requires_otp = models.BooleanField(default=False)
     shuffle_fields = models.BooleanField(default=True)
     default_language = models.CharField(
