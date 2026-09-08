@@ -54,7 +54,7 @@ export function FileUploadField({
         <input
           id={id}
           type="file"
-          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           className="sr-only"
           disabled={disabled}
           onChange={(e) => {
@@ -64,7 +64,12 @@ export function FileUploadField({
               return
             }
             const err = validateFileBasic(f)
-            onChange(f, err)
+            if (err) {
+              e.target.value = ''
+              onChange(null, err)
+            } else {
+              onChange(f, null)
+            }
           }}
         />
       </label>

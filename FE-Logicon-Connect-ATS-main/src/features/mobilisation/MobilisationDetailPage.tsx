@@ -6,13 +6,18 @@ import {
   ArrowRight,
   Building2,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Clock,
   FileText,
   History,
   IndianRupee,
+  LayoutGrid,
+  ListFilter,
   MapPin,
   MessageSquare,
+  Search,
   Users,
   XCircle,
 } from 'lucide-react'
@@ -51,6 +56,7 @@ import {
   mobilisationFinalizationLabel,
   mobilisationStatusLabel,
   type MobilisationSalesContext,
+  type MobilisationSalesContextSite,
   type MobilisationSetupRequest,
 } from '@/features/mobilisation/types'
 import { ClientUsersPanel } from '@/features/mobilisation/components/ClientUsersPanel'
@@ -126,6 +132,138 @@ function formatIndianCurrency(value: string | number | null | undefined): string
   return formatted === '—' ? '—' : `₹${formatted}`
 }
 
+// ─── Site Role Requirements Card with Pagination ──────────────────────────────
+
+function SiteRoleRequirementsCard({ site }: { site: MobilisationSalesContextSite }) {
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const pageSize = 5
+
+  const filteredRoles = useMemo(() => {
+    if (!search.trim()) return site.roles
+    const q = search.toLowerCase()
+    return site.roles.filter((r) =>
+      (r.job_role_name ?? '').toLowerCase().includes(q) ||
+      (r.service_category ?? '').toLowerCase().includes(q) ||
+      (r.wage_category_name ?? '').toLowerCase().includes(q)
+    )
+  }, [site.roles, search])
+
+  const totalPages = Math.max(1, Math.ceil(filteredRoles.length / pageSize))
+  const safePage = Math.min(page, totalPages)
+  const start = (safePage - 1) * pageSize
+  const pagedRoles = filteredRoles.slice(start, start + pageSize)
+  const startItem = filteredRoles.length === 0 ? 0 : start + 1
+  const endItem = Math.min(start + pageSize, filteredRoles.length)
+
+  return (
+    <div className="rounded-xl border border-app-border bg-app-surface overflow-hidden shadow-sm flex flex-col">
+      {/* Site header */}
+      <div className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/30 px-4 py-3 border-b border-app-border">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/10">
+            <Building2 className="h-4 w-4 text-brand-600" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-app-text truncate">{site.site_name}</p>
+            <p className="flex items-center gap-1 text-xs text-app-subtle truncate">
+              <MapPin className="h-3 w-3 shrink-0" />
+              {site.city}{site.state ? `, ${site.state}` : ''}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="inline-flex items-center rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
+            <Users className="mr-1 h-3 w-3" />
+            {site.headcount}
+          </span>
+        </div>
+      </div>
+
+      {/* Role list search if site has > 5 roles */}
+      {site.roles.length > 5 ? (
+        <div className="p-3 pb-1">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle" />
+            <input
+              type="text"
+              placeholder={`Filter ${site.roles.length} roles...`}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value)
+                setPage(1)
+              }}
+              className="w-full rounded-lg border border-app-border bg-app-bg py-1.5 pl-8 pr-3 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {/* Roles list */}
+      <div className="p-3 space-y-2 flex-1">
+        {site.roles.length === 0 ? (
+          <div className="p-4 text-center text-sm text-app-subtle">No roles defined</div>
+        ) : pagedRoles.length === 0 ? (
+          <div className="p-4 text-center text-xs text-app-subtle">No roles match "{search}"</div>
+        ) : (
+          pagedRoles.map((role) => (
+            <div key={role.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50/50 dark:bg-slate-800/20 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-app-text truncate">{role.job_role_name ?? 'Unknown Role'}</p>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-app-subtle">
+                  {role.wage_category_name ? (
+                    <span className="rounded bg-brand-50 dark:bg-brand-900/20 px-1.5 py-0.5 text-brand-700 dark:text-brand-400">{role.wage_category_name}</span>
+                  ) : null}
+                  {role.service_category ? (
+                    <span>{role.service_category}</span>
+                  ) : null}
+                  {role.shift_hours ? (
+                    <span>{role.shift_hours}h shift</span>
+                  ) : null}
+                </div>
+              </div>
+              <span className="shrink-0 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
+                ×{role.manpower_count}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Pagination controls if site has > 5 roles */}
+      {filteredRoles.length > pageSize || totalPages > 1 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-slate-50/50 dark:bg-slate-800/10 px-3 py-2">
+          <p className="text-[11px] text-app-subtle">
+            {startItem}-{endItem} of {filteredRoles.length} roles
+            {search && filteredRoles.length !== site.roles.length ? ` (filtered)` : ''}
+          </p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center rounded border border-app-border bg-app-surface px-2 py-0.5 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+            >
+              <ChevronLeft className="h-3 w-3" />
+            </button>
+            <span className="text-xs text-app-secondary">
+              {safePage}/{totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="inline-flex items-center rounded border border-app-border bg-app-surface px-2 py-0.5 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+            >
+              <ChevronRight className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab({
@@ -141,6 +279,15 @@ function OverviewTab({
   const [contextLoading, setContextLoading] = useState(true)
   const [contextError, setContextError] = useState<string | null>(null)
   const [activeProposedUsers, setActiveProposedUsers] = useState(0)
+
+  // Roles & Sites pagination & view states
+  const [roleViewMode, setRoleViewMode] = useState<'sites' | 'table'>('sites')
+  const [globalRoleSearch, setGlobalRoleSearch] = useState('')
+  const [sitePage, setSitePage] = useState(1)
+  const [sitePageSize] = useState<number>(4)
+  const [tablePage, setTablePage] = useState(1)
+  const [tablePageSize, setTablePageSize] = useState<number>(10)
+  const TABLE_PAGE_SIZES = [10, 25, 50] as const
 
   useEffect(() => {
     async function loadContext() {
@@ -173,6 +320,68 @@ function OverviewTab({
       cancelled = true
     }
   }, [row.id, usersRefreshKey])
+
+  const ctx = salesContext
+  const lead = ctx?.lead
+  const proposal = ctx?.proposal
+  const sites = useMemo(() => ctx?.sites ?? [], [ctx?.sites])
+  const proposalVersions = ctx?.proposal_versions ?? []
+  const readyForFinalization = activeProposedUsers >= 1
+
+  // Calculate totals and memoized lists
+  const totalHeadcount = useMemo(() => sites.reduce((sum, s) => sum + s.headcount, 0), [sites])
+  const totalRolesCount = useMemo(() => sites.reduce((sum, s) => sum + s.roles.length, 0), [sites])
+
+  const allRolesFlat = useMemo(() => {
+    return sites.flatMap((s) =>
+      s.roles.map((r) => ({
+        ...r,
+        site_id: s.id,
+        site_name: s.site_name,
+        site_location: `${s.city}${s.state ? `, ${s.state}` : ''}`,
+      }))
+    )
+  }, [sites])
+
+  const filteredAllRoles = useMemo(() => {
+    if (!globalRoleSearch.trim()) return allRolesFlat
+    const q = globalRoleSearch.toLowerCase()
+    return allRolesFlat.filter((r) =>
+      (r.job_role_name ?? '').toLowerCase().includes(q) ||
+      (r.service_category ?? '').toLowerCase().includes(q) ||
+      (r.wage_category_name ?? '').toLowerCase().includes(q) ||
+      r.site_name.toLowerCase().includes(q)
+    )
+  }, [allRolesFlat, globalRoleSearch])
+
+  const tableTotalPages = Math.max(1, Math.ceil(filteredAllRoles.length / tablePageSize))
+  const safeTablePage = Math.min(tablePage, tableTotalPages)
+  const tableStart = (safeTablePage - 1) * tablePageSize
+  const pagedTableRoles = filteredAllRoles.slice(tableStart, tableStart + tablePageSize)
+  const tableStartItem = filteredAllRoles.length === 0 ? 0 : tableStart + 1
+  const tableEndItem = Math.min(tableStart + tablePageSize, filteredAllRoles.length)
+
+  const filteredSites = useMemo(() => {
+    if (!globalRoleSearch.trim()) return sites
+    const q = globalRoleSearch.toLowerCase()
+    return sites.filter((s) =>
+      s.site_name.toLowerCase().includes(q) ||
+      s.city.toLowerCase().includes(q) ||
+      (s.state ?? '').toLowerCase().includes(q) ||
+      s.roles.some((r) =>
+        (r.job_role_name ?? '').toLowerCase().includes(q) ||
+        (r.service_category ?? '').toLowerCase().includes(q) ||
+        (r.wage_category_name ?? '').toLowerCase().includes(q)
+      )
+    )
+  }, [sites, globalRoleSearch])
+
+  const siteTotalPages = Math.max(1, Math.ceil(filteredSites.length / sitePageSize))
+  const safeSitePage = Math.min(sitePage, siteTotalPages)
+  const siteStart = (safeSitePage - 1) * sitePageSize
+  const pagedSites = filteredSites.slice(siteStart, siteStart + sitePageSize)
+  const siteStartItem = filteredSites.length === 0 ? 0 : siteStart + 1
+  const siteEndItem = Math.min(siteStart + sitePageSize, filteredSites.length)
 
   // Check if this mobilisation has sales source
   const hasSalesSource = row.source_sales_lead != null || row.source_proposal_version != null
@@ -243,16 +452,6 @@ function OverviewTab({
       </div>
     )
   }
-
-  const ctx = salesContext
-  const lead = ctx?.lead
-  const proposal = ctx?.proposal
-  const sites = ctx?.sites ?? []
-  const proposalVersions = ctx?.proposal_versions ?? []
-  const readyForFinalization = activeProposedUsers >= 1
-
-  // Calculate totals
-  const totalHeadcount = sites.reduce((sum, s) => sum + s.headcount, 0)
 
   return (
     <div className="space-y-6">
@@ -387,75 +586,227 @@ function OverviewTab({
 
       {/* Sites to Mobilise */}
       {sites.length > 0 ? (
-        <section>
-          <div className="mb-4 flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
-              <Building2 className="h-4 w-4 text-brand-600" />
+        <section className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <Building2 className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">
+                Sites &amp; role requirements
+              </h3>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                Already created from sales conversion
+              </span>
+              <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
+                {sites.length} {sites.length === 1 ? 'site' : 'sites'} · {totalHeadcount} people · {totalRolesCount} roles
+              </span>
             </div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Sites &amp; role requirements</h3>
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-              Already created from sales conversion
-            </span>
-            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
-              {sites.length} {sites.length === 1 ? 'site' : 'sites'} · {totalHeadcount} people
-            </span>
+
+            {/* View Mode Switcher */}
+            {totalRolesCount > 5 ? (
+              <div className="inline-flex rounded-lg border border-app-border bg-app-surface p-0.5 self-start sm:self-auto shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setRoleViewMode('sites')}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    roleViewMode === 'sites'
+                      ? 'bg-brand-600 text-white shadow-xs'
+                      : 'text-app-secondary hover:text-app-text'
+                  }`}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  By Site
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRoleViewMode('table')}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    roleViewMode === 'table'
+                      ? 'bg-brand-600 text-white shadow-xs'
+                      : 'text-app-secondary hover:text-app-text'
+                  }`}
+                >
+                  <ListFilter className="h-3.5 w-3.5" />
+                  All Roles Table
+                </button>
+              </div>
+            ) : null}
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {sites.map((site) => (
-              <div key={site.id} className="rounded-xl border border-app-border bg-app-surface overflow-hidden shadow-sm">
-                {/* Site header */}
-                <div className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/30 px-4 py-3 border-b border-app-border">
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/10">
-                      <Building2 className="h-4 w-4 text-brand-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-app-text">{site.site_name}</p>
-                      <p className="flex items-center gap-1 text-xs text-app-subtle">
-                        <MapPin className="h-3 w-3" />
-                        {site.city}{site.state ? `, ${site.state}` : ''}
-                      </p>
-                    </div>
-                  </div>
+
+          {/* Global search if total roles > 5 or sites > 2 */}
+          {totalRolesCount > 5 || sites.length > 2 ? (
+            <div className="relative max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle" />
+              <input
+                type="text"
+                placeholder="Search roles or sites..."
+                value={globalRoleSearch}
+                onChange={(e) => {
+                  setGlobalRoleSearch(e.target.value)
+                  setSitePage(1)
+                  setTablePage(1)
+                }}
+                className="w-full rounded-lg border border-app-border bg-app-bg py-1.5 pl-8 pr-3 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+          ) : null}
+
+          {/* ── Option A: Sites Grid with SiteRoleRequirementsCard ── */}
+          {roleViewMode === 'sites' ? (
+            <>
+              {pagedSites.length === 0 ? (
+                <div className="rounded-xl border border-app-border bg-app-surface p-6 text-center text-xs text-app-subtle">
+                  No sites or roles match "{globalRoleSearch}".
+                </div>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {pagedSites.map((site) => (
+                    <SiteRoleRequirementsCard key={site.id} site={site} />
+                  ))}
+                </div>
+              )}
+
+              {/* Site pagination if more than sitePageSize */}
+              {filteredSites.length > sitePageSize || siteTotalPages > 1 ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-app-border bg-app-surface px-4 py-2.5 shadow-xs">
+                  <p className="text-xs text-app-secondary">
+                    Showing site <span className="font-semibold text-app-text">{siteStartItem}</span> to{' '}
+                    <span className="font-semibold text-app-text">{siteEndItem}</span> of{' '}
+                    <span className="font-semibold text-app-text">{filteredSites.length}</span> sites
+                  </p>
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
-                      <Users className="mr-1 h-3 w-3" />
-                      {site.headcount}
+                    <button
+                      type="button"
+                      disabled={safeSitePage <= 1}
+                      onClick={() => setSitePage((p) => Math.max(1, p - 1))}
+                      className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      Prev
+                    </button>
+                    <span className="rounded bg-app-muted px-2.5 py-1 text-xs font-semibold text-app-text">
+                      Page {safeSitePage} of {siteTotalPages}
                     </span>
+                    <button
+                      type="button"
+                      disabled={safeSitePage >= siteTotalPages}
+                      onClick={() => setSitePage((p) => Math.min(siteTotalPages, p + 1))}
+                      className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                    >
+                      Next
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
-
-                {/* Roles list */}
-                {site.roles.length > 0 ? (
-                  <div className="p-3 space-y-2">
-                    {site.roles.map((role) => (
-                      <div key={role.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50/50 dark:bg-slate-800/20 px-3 py-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-app-text truncate">{role.job_role_name ?? 'Unknown Role'}</p>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-app-subtle">
+              ) : null}
+            </>
+          ) : (
+            /* ── Option B: Consolidated All Roles Table ── */
+            <div className="rounded-xl border border-app-border bg-app-surface overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-app-border bg-slate-50 dark:bg-slate-800/30 text-left">
+                      <th className="px-4 py-2.5 text-xs font-semibold text-app-subtle">Job role</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-app-subtle">Site</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-app-subtle">Category</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-app-subtle">Shift</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-semibold text-app-subtle">Count</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-app-border">
+                    {pagedTableRoles.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-xs text-app-subtle">
+                          No roles found matching "{globalRoleSearch}".
+                        </td>
+                      </tr>
+                    ) : (
+                      pagedTableRoles.map((role, idx) => (
+                        <tr key={`${role.site_id}-${role.id}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+                          <td className="px-4 py-2.5 font-medium text-app-text">
+                            {role.job_role_name ?? 'Unknown Role'}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-app-secondary">
+                            <span className="font-medium text-app-text">{role.site_name}</span>
+                            {role.site_location ? (
+                              <span className="block text-app-subtle">{role.site_location}</span>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-app-secondary">
                             {role.wage_category_name ? (
-                              <span className="rounded bg-brand-50 dark:bg-brand-900/20 px-1.5 py-0.5 text-brand-700 dark:text-brand-400">{role.wage_category_name}</span>
-                            ) : null}
-                            {role.service_category ? (
-                              <span>{role.service_category}</span>
-                            ) : null}
-                            {role.shift_hours ? (
-                              <span>{role.shift_hours}h shift</span>
-                            ) : null}
-                          </div>
-                        </div>
-                        <span className="shrink-0 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
-                          ×{role.manpower_count}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-4 text-center text-sm text-app-subtle">No roles defined</div>
-                )}
+                              <span className="rounded bg-brand-50 dark:bg-brand-900/20 px-1.5 py-0.5 text-brand-700 dark:text-brand-400 font-medium">
+                                {role.wage_category_name}
+                              </span>
+                            ) : (
+                              role.service_category || '—'
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-app-secondary">
+                            {role.shift_hours ? `${role.shift_hours}h shift` : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400">
+                            ×{role.manpower_count}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
+
+              {/* Table Pagination Footer */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-app-border px-4 py-2.5">
+                <div className="flex items-center gap-2 text-xs text-app-secondary">
+                  <span>Rows:</span>
+                  {TABLE_PAGE_SIZES.map((ps) => (
+                    <button
+                      key={ps}
+                      type="button"
+                      onClick={() => {
+                        setTablePageSize(ps)
+                        setTablePage(1)
+                      }}
+                      className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                        tablePageSize === ps
+                          ? 'bg-brand-600 text-white'
+                          : 'border border-app-border text-app-secondary hover:bg-app-muted'
+                      }`}
+                    >
+                      {ps}
+                    </button>
+                  ))}
+                  <span className="ml-2 text-app-subtle">
+                    Showing {tableStartItem}-{tableEndItem} of {filteredAllRoles.length} roles
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={safeTablePage <= 1}
+                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Prev
+                  </button>
+                  <span className="rounded bg-app-muted px-2.5 py-1 text-xs font-semibold text-app-text">
+                    Page {safeTablePage} of {tableTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeTablePage >= tableTotalPages}
+                    onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
+                    className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                  >
+                    Next
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       ) : null}
 

@@ -40,6 +40,8 @@ def _run(resume) -> None:
         _set_manual_review(resume, str(exc))
         return
 
+    raw_text = (raw_text or '').replace('\x00', '')
+    cleaned_text = (cleaned_text or '').replace('\x00', '')
     Resume.objects.filter(pk=resume.pk).update(
         raw_text=raw_text,
         cleaned_text=cleaned_text,
@@ -107,6 +109,7 @@ def _set_status(resume, status: str) -> None:
 
 def _set_manual_review(resume, reason: str) -> None:
     from apps.talent.models import Resume
+    reason = (reason or '').replace('\x00', '')
     Resume.objects.filter(pk=resume.pk).update(
         status='manual_review',
         manual_review_reason=reason[:2000],
@@ -117,6 +120,7 @@ def _set_manual_review(resume, reason: str) -> None:
 
 def _set_status_with_error(resume, status: str, error: str) -> None:
     from apps.talent.models import Resume
+    error = (error or '').replace('\x00', '')
     Resume.objects.filter(pk=resume.pk).update(
         status=status,
         error_message=error,

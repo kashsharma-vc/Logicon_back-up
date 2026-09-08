@@ -1010,24 +1010,38 @@ function RoleRequirementDrawer({
 
 // ─── Role requirements tab ────────────────────────────────────────────────────
 
+const RR_PAGE_SIZES = [10, 25, 50, 100] as const
+
 function RoleRequirementsTab({ leadId, canEdit }: { leadId: number; canEdit: boolean }) {
   const navigate = useNavigate()
   const [rows, setRows] = useState<SalesRoleRequirement[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [surveys, setSurveys] = useState<SiteSurvey[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<SalesRoleRequirement | null>(null)
 
-  async function load() {
+  // ─── Pagination / filter state ───────────────────────────────────────────
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(25)
+  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  const startItem = totalCount === 0 ? 0 : (page - 1) * pageSize + 1
+  const endItem = Math.min(page * pageSize, totalCount)
+
+  async function load(p: number, ps: number, q: string) {
     setLoading(true)
     setError(null)
     try {
       const [reqRes, survRes] = await Promise.all([
-        listSalesRoleRequirements({ lead: leadId }),
+        listSalesRoleRequirements({ lead: leadId, page: p, page_size: ps, search: q || undefined }),
         listSiteSurveys({ lead: leadId }),
       ])
       setRows(reqRes.items)
+      setTotalCount(reqRes.count ?? reqRes.items.length)
       setSurveys(survRes.items)
     } catch (e: unknown) {
       setError(parseApiError(e, 'Failed to load role requirements').message)
@@ -1040,14 +1054,30 @@ function RoleRequirementsTab({ leadId, canEdit }: { leadId: number; canEdit: boo
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [pendingDeleteRrId, setPendingDeleteRrId] = useState<number | null>(null)
 
-  useEffect(() => { void load() }, [leadId])
+  // Single effect — covers initial load + leadId change (resets page) + pagination/search changes
+  useEffect(() => {
+    void load(page, pageSize, search)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId, page, pageSize, search])
+
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setPage(1)
+    setSearch(searchInput)
+  }
+
+  function handlePageSizeChange(ps: number) {
+    setPageSize(ps)
+    setPage(1)
+  }
 
   async function handleDelete(id: number) {
     setPendingDeleteRrId(null)
     setRowError(null)
     try {
       await deleteSalesRoleRequirement(id)
-      setRows((prev) => prev.filter((r) => r.id !== id))
+      void load(page, pageSize, search)
     } catch (e: unknown) {
       setRowError(parseApiError(e, 'Delete failed').message)
     }
@@ -1066,7 +1096,6 @@ function RoleRequirementsTab({ leadId, canEdit }: { leadId: number; canEdit: boo
     }
   }
 
-  if (loading) return <Spinner label="Loading role requirements…" />
   if (error) return <ErrorState message={error} />
 
   return (
@@ -1097,96 +1126,175 @@ function RoleRequirementsTab({ leadId, canEdit }: { leadId: number; canEdit: boo
         <p className="rounded-panel bg-status-danger/8 px-4 py-2 text-sm text-status-danger">{rowError}</p>
       ) : null}
 
-      {canEdit ? (
-        <div className="flex justify-end">
-          <Button onClick={() => { setEditing(null); setDrawerOpen(true) }} className="gap-1">
+      {/* ── Toolbar ── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by role or site…"
+            className="h-8 rounded border border-app-border bg-app-surface px-3 text-xs text-app-text placeholder:text-app-muted focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30 w-52"
+          />
+          <button
+            type="submit"
+            className="h-8 rounded border border-app-border bg-app-muted px-3 text-xs text-app-secondary hover:bg-app-surface"
+          >
+            Search
+          </button>
+          {search ? (
+            <button
+              type="button"
+              className="text-xs text-app-secondary hover:text-app-text"
+              onClick={() => { setSearchInput(''); setSearch(''); setPage(1) }}
+            >
+              Clear
+            </button>
+          ) : null}
+        </form>
+
+        {totalCount > 0 && (
+          <span className="ml-auto text-xs text-app-secondary">
+            {loading ? 'Loading…' : `${startItem}–${endItem} of ${totalCount} requirements`}
+          </span>
+        )}
+
+        {canEdit ? (
+          <Button onClick={() => { setEditing(null); setDrawerOpen(true) }} className="gap-1 ml-0">
             <Plus className="h-4 w-4" />
             Add requirement
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
-      {rows.length === 0 ? (
+      {loading ? (
+        <Spinner label="Loading role requirements…" />
+      ) : rows.length === 0 ? (
         <EmptyState
-          title="No role requirements"
-          description="Requirements will appear here once added or generated from a survey."
+          title={search ? 'No matching requirements' : 'No role requirements'}
+          description={search ? 'Try a different search term.' : 'Requirements will appear here once added or generated from a survey.'}
         />
       ) : (
-        <div className="overflow-x-auto rounded-panel border border-app-border shadow-panel">
-          <Table>
-            <THead>
-              <TR>
-                <TH>Job role</TH>
-                <TH>Site</TH>
-                <TH>Service</TH>
-                <TH>HC</TH>
-                <TH>Shift hrs</TH>
-                <TH>Working days</TH>
-                <TH>Status</TH>
-                {canEdit ? <TH>Actions</TH> : null}
-              </TR>
-            </THead>
-            <TBody>
-              {rows.map((r) => (
-                <TR key={r.id}>
-                  <TD className="text-sm">
-                    {r.job_role_name ?? (r.job_role != null ? `#${r.job_role}` : '—')}
-                  </TD>
-                  <TD className="text-xs text-app-secondary">{r.site_name ?? (r.site != null ? `#${r.site}` : '—')}</TD>
-                  <TD className="text-xs text-app-secondary">{r.service_category || '—'}</TD>
-                  <TD className="text-sm">{r.manpower_count}</TD>
-                  <TD className="text-xs text-app-secondary">{r.shift_hours ?? '—'}</TD>
-                  <TD className="text-xs text-app-secondary">{r.working_days ?? '—'}</TD>
-                  <TD>
-                    <div className="flex flex-wrap gap-1">
-                      {r.approved_by_operations ? <Badge variant="success">Approved</Badge> : <Badge variant="neutral">Draft</Badge>}
-                      {r.is_active === false ? <Badge variant="danger">Inactive</Badge> : null}
-                      {r.created_from_survey ? <Badge variant="info">Survey</Badge> : null}
-                    </div>
-                  </TD>
-                  {canEdit ? (
+        <>
+          <div className="overflow-x-auto rounded-panel border border-app-border shadow-panel">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Job role</TH>
+                  <TH>Site</TH>
+                  <TH>Service</TH>
+                  <TH>HC</TH>
+                  <TH>Shift hrs</TH>
+                  <TH>Working days</TH>
+                  <TH>Status</TH>
+                  {canEdit ? <TH>Actions</TH> : null}
+                </TR>
+              </THead>
+              <TBody>
+                {rows.map((r) => (
+                  <TR key={r.id}>
+                    <TD className="text-sm">
+                      {r.job_role_name ?? (r.job_role != null ? `#${r.job_role}` : '—')}
+                    </TD>
+                    <TD className="text-xs text-app-secondary">{r.site_name ?? (r.site != null ? `#${r.site}` : '—')}</TD>
+                    <TD className="text-xs text-app-secondary">{r.service_category || '—'}</TD>
+                    <TD className="text-sm">{r.manpower_count}</TD>
+                    <TD className="text-xs text-app-secondary">{r.shift_hours ?? '—'}</TD>
+                    <TD className="text-xs text-app-secondary">{r.working_days ?? '—'}</TD>
                     <TD>
-                      <div className="flex items-center gap-2">
-                        {!r.approved_by_operations ? (
-                          <button
-                            type="button"
-                            className="text-xs text-status-success hover:underline disabled:opacity-50"
-                            disabled={approvingId === r.id}
-                            onClick={() => void handleApprove(r.id)}
-                          >
-                            {approvingId === r.id ? 'Approving…' : 'Approve'}
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="text-xs text-brand-600 hover:underline"
-                          onClick={() => { setEditing(r); setDrawerOpen(true) }}
-                        >
-                          Edit
-                        </button>
-                        {pendingDeleteRrId === r.id ? (
-                          <span className="flex items-center gap-1">
-                            <span className="text-xs text-app-secondary">Sure?</span>
-                            <button type="button" className="text-xs text-status-danger hover:underline" onClick={() => void handleDelete(r.id)}>Yes</button>
-                            <button type="button" className="text-xs text-app-secondary hover:underline" onClick={() => setPendingDeleteRrId(null)}>No</button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-xs text-status-danger hover:underline"
-                            onClick={() => setPendingDeleteRrId(r.id)}
-                          >
-                            Delete
-                          </button>
-                        )}
+                      <div className="flex flex-wrap gap-1">
+                        {r.approved_by_operations ? <Badge variant="success">Approved</Badge> : <Badge variant="neutral">Draft</Badge>}
+                        {r.is_active === false ? <Badge variant="danger">Inactive</Badge> : null}
+                        {r.created_from_survey ? <Badge variant="info">Survey</Badge> : null}
                       </div>
                     </TD>
-                  ) : null}
-                </TR>
+                    {canEdit ? (
+                      <TD>
+                        <div className="flex items-center gap-2">
+                          {!r.approved_by_operations ? (
+                            <button
+                              type="button"
+                              className="text-xs text-status-success hover:underline disabled:opacity-50"
+                              disabled={approvingId === r.id}
+                              onClick={() => void handleApprove(r.id)}
+                            >
+                              {approvingId === r.id ? 'Approving…' : 'Approve'}
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="text-xs text-brand-600 hover:underline"
+                            onClick={() => { setEditing(r); setDrawerOpen(true) }}
+                          >
+                            Edit
+                          </button>
+                          {pendingDeleteRrId === r.id ? (
+                            <span className="flex items-center gap-1">
+                              <span className="text-xs text-app-secondary">Sure?</span>
+                              <button type="button" className="text-xs text-status-danger hover:underline" onClick={() => void handleDelete(r.id)}>Yes</button>
+                              <button type="button" className="text-xs text-app-secondary hover:underline" onClick={() => setPendingDeleteRrId(null)}>No</button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-xs text-status-danger hover:underline"
+                              onClick={() => setPendingDeleteRrId(r.id)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </TD>
+                    ) : null}
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+
+          {/* ── Pagination footer ── */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-app-border px-4 py-2">
+            <div className="flex items-center gap-2 text-xs text-app-secondary">
+              <span>Rows per page:</span>
+              {RR_PAGE_SIZES.map((ps) => (
+                <button
+                  key={ps}
+                  type="button"
+                  onClick={() => handlePageSizeChange(ps)}
+                  className={`rounded px-2 py-0.5 transition-colors ${
+                    pageSize === ps
+                      ? 'bg-brand-600 text-white'
+                      : 'hover:bg-app-muted text-app-secondary'
+                  }`}
+                >
+                  {ps}
+                </button>
               ))}
-            </TBody>
-          </Table>
-        </div>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-app-secondary">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded border border-app-border px-2 py-0.5 text-app-secondary hover:bg-app-muted disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded border border-app-border px-2 py-0.5 text-app-secondary hover:bg-app-muted disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       <RoleRequirementDrawer
@@ -1194,13 +1302,10 @@ function RoleRequirementsTab({ leadId, canEdit }: { leadId: number; canEdit: boo
         leadId={leadId}
         editing={editing}
         onClose={() => setDrawerOpen(false)}
-        onSaved={(saved) => {
-          setRows((prev) => {
-            const idx = prev.findIndex((r) => r.id === saved.id)
-            return idx >= 0 ? prev.map((r) => (r.id === saved.id ? saved : r)) : [saved, ...prev]
-          })
+        onSaved={() => {
           setDrawerOpen(false)
           setEditing(null)
+          void load(page, pageSize, search)
         }}
       />
     </div>

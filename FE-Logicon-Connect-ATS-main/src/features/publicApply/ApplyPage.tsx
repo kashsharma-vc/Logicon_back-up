@@ -17,6 +17,7 @@ import { FileUploadField } from '@/features/publicApply/FileUploadField'
 import {
   isEmptyFieldValue,
   validateBusinessRules,
+  validateFileBasic,
   validateMobile10Digits,
   validateRequiredFields,
 } from '@/features/publicApply/validation'
@@ -252,10 +253,23 @@ export function ApplyPage() {
     setCandidateErrors(nextCandidateErrors)
 
     let nextResumeError: string | null = null
-    if (!resume) nextResumeError = 'resumeRequired'
+    if (!resume) {
+      nextResumeError = 'resumeRequired'
+    } else {
+      const basicErr = validateFileBasic(resume)
+      if (basicErr) nextResumeError = basicErr
+    }
     setResumeError(nextResumeError)
 
     const requiredErrors = validateRequiredFields(fieldsForValidation, fieldValues, fieldFiles)
+    for (const f of allFields) {
+      if (f.field_type !== 'file') continue
+      const uploaded = fieldFiles[f.id]
+      if (uploaded) {
+        const fileErr = validateFileBasic(uploaded)
+        if (fileErr) requiredErrors[f.id] = fileErr
+      }
+    }
     setFieldErrors((prev) => ({ ...prev, ...requiredErrors }))
 
     const valuesByKey: Record<string, unknown> = {}

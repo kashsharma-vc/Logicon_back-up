@@ -332,6 +332,86 @@ export async function createSiteSurveyShiftDeployment(
   return data
 }
 
+export interface BulkApplyShiftRangePayload {
+  survey: number
+  general_count: number
+  first_shift_count: number
+  second_shift_count: number
+  night_shift_count: number
+  remarks?: string
+  target_mode?: 'mapped' | 'all'
+  deployment_ids?: number[]
+}
+
+export interface BulkApplyShiftRangeResponse {
+  count: number
+  items: SiteSurveyShiftDeployment[]
+  message: string
+}
+
+export async function bulkApplySurveyDeploymentRange(
+  payload: BulkApplyShiftRangePayload,
+): Promise<BulkApplyShiftRangeResponse> {
+  const { data } = await api.post<BulkApplyShiftRangeResponse>(
+    '/api/sales/site-survey-shift-deployments/bulk-apply-range/',
+    payload,
+  )
+  return data
+}
+
+export interface ImportAllMappedRolesPayload {
+  survey: number
+  job_role_ids?: number[]
+  general_count?: number
+  first_shift_count?: number
+  second_shift_count?: number
+  night_shift_count?: number
+  remarks?: string
+}
+
+export interface ImportAllMappedRolesResponse {
+  added_count: number
+  total_count: number
+  items: SiteSurveyShiftDeployment[]
+  message: string
+}
+
+export async function importAllSurveyMappedRoles(
+  payload: ImportAllMappedRolesPayload,
+): Promise<ImportAllMappedRolesResponse> {
+  const { data } = await api.post<ImportAllMappedRolesResponse>(
+    '/api/sales/site-survey-shift-deployments/import-all-mapped-roles/',
+    payload,
+  )
+  return data
+}
+
+export async function deleteSiteSurveyShiftDeployment(id: number): Promise<void> {
+  await api.delete(`/api/sales/site-survey-shift-deployments/${id}/`)
+}
+
+export interface SurveyDeploymentsQuickActionPayload {
+  survey: number
+  action: 'turn_off_unused' | 'turn_all_off' | 'turn_all_on' | 'remove_unused' | 'turn_selected_on' | 'turn_selected_off'
+  deployment_ids?: number[]
+}
+
+export interface SurveyDeploymentsQuickActionResponse {
+  action: string
+  items: SiteSurveyShiftDeployment[]
+  message: string
+}
+
+export async function executeSurveyDeploymentsQuickAction(
+  payload: SurveyDeploymentsQuickActionPayload,
+): Promise<SurveyDeploymentsQuickActionResponse> {
+  const { data } = await api.post<SurveyDeploymentsQuickActionResponse>(
+    '/api/sales/site-survey-shift-deployments/quick-actions/',
+    payload,
+  )
+  return data
+}
+
 // ─── Site Survey: Location Lines ──────────────────────────────────────────────
 
 export interface ListSiteSurveyLocationLinesParams {
@@ -618,6 +698,8 @@ export interface ListSalesRoleRequirementsParams {
   lead?: number
   survey?: number
   page?: number
+  page_size?: number
+  search?: string
 }
 
 export async function listSalesRoleRequirements(

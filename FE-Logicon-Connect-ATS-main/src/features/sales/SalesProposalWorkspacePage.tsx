@@ -489,6 +489,12 @@ export function SalesProposalWorkspacePage() {
   const [tab, setTab] = useState<TabId>('overview')
   const [saveStates, setSaveStates] = useState<Record<string, RowSaveState>>({})
 
+  // Budget Lines tab — client-side search + pagination
+  const [blSearch, setBlSearch] = useState('')
+  const [blSearchInput, setBlSearchInput] = useState('')
+  const [blPage, setBlPage] = useState(1)
+  const [blPageSize, setBlPageSize] = useState(25)
+
   // Approval tab state
   const [selectedRoute, setSelectedRoute] = useState('')
   const [approvalBusy, setApprovalBusy] = useState(false)
@@ -877,12 +883,24 @@ export function SalesProposalWorkspacePage() {
   // ── Tab: Budget Lines ──────────────────────────────────────────────────────
 
   function budgetLinesTab() {
-    // Calculate totals for display
-    const totalManpower = budgetLines.reduce((sum, r) => sum + (r.manpower_count ?? 0), 0)
-    const totalCost = budgetLines.reduce((sum, r) => {
-      const cost = typeof r.total_cost === 'string' ? parseFloat(r.total_cost.replace(/,/g, '')) : (r.total_cost ?? 0)
-      return sum + (isNaN(cost) ? 0 : cost)
-    }, 0)
+    if (!proposal) return null
+    const BL_PAGE_SIZES = [10, 25, 50, 100] as const
+
+    // Filtering + pagination (client-side — all lines are loaded at once since NoPagination is set on the BE)
+    const filteredLines = blSearch
+      ? budgetLines.filter(
+          (r) =>
+            (r.job_role_name ?? '').toLowerCase().includes(blSearch.toLowerCase()) ||
+            (r.site_name ?? '').toLowerCase().includes(blSearch.toLowerCase()),
+        )
+      : budgetLines
+
+    const blTotalPages = Math.max(1, Math.ceil(filteredLines.length / blPageSize))
+    const blStart = (blPage - 1) * blPageSize
+    const blEnd = blStart + blPageSize
+    const pagedLines = filteredLines.slice(blStart, blEnd)
+    const blStartItem = filteredLines.length === 0 ? 0 : blStart + 1
+    const blEndItem = Math.min(blEnd, filteredLines.length)
 
     return (
       <div className="space-y-4">
@@ -897,7 +915,7 @@ export function SalesProposalWorkspacePage() {
           <EmptyState title="No budget lines" description="Budget lines will appear here once added by the backend." />
         ) : (
           <>
-            {/* Summary cards */}
+            {/* Summary cards — always use proposal model totals (correct even with many lines) */}
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
                 <div className="flex items-center gap-2">
@@ -905,7 +923,7 @@ export function SalesProposalWorkspacePage() {
                     <Users className="h-4 w-4 text-brand-500" />
                   </div>
                   <div>
-                    <p className="text-xl font-bold text-app-text">{totalManpower}</p>
+                    <p className="text-xl font-bold text-app-text">{proposal.manpower_total ?? '—'}</p>
                     <p className="text-xs text-app-subtle">Total Manpower</p>
                   </div>
                 </div>
@@ -916,8 +934,8 @@ export function SalesProposalWorkspacePage() {
                     <IndianRupee className="h-4 w-4 text-brand-500" />
                   </div>
                   <div>
-                    <p className="text-xl font-bold text-app-text">{formatIndianCurrency(totalCost)}</p>
-                    <p className="text-xs text-app-subtle">Total Cost</p>
+                    <p className="text-xl font-bold text-app-text">{formatIndianCurrency(proposal.grand_total)}</p>
+                    <p className="text-xs text-app-subtle">Grand Total (incl. GST)</p>
                   </div>
                 </div>
               </div>
@@ -934,6 +952,33 @@ export function SalesProposalWorkspacePage() {
               </div>
             </div>
 
+            {/* Search toolbar */}
+            <div className="flex flex-wrap items-center gap-3">
+              <form
+                onSubmit={(e) => { e.preventDefault(); setBlPage(1); setBlSearch(blSearchInput) }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={blSearchInput}
+                  onChange={(e) => setBlSearchInput(e.target.value)}
+                  placeholder="Search role or site…"
+                  className="h-8 w-52 rounded border border-app-border bg-app-surface px-3 text-xs text-app-text placeholder:text-app-muted focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30"
+                />
+                <button type="submit" className="h-8 rounded border border-app-border bg-app-muted px-3 text-xs text-app-secondary hover:bg-app-surface">
+                  Search
+                </button>
+                {blSearch ? (
+                  <button type="button" className="text-xs text-app-secondary hover:text-app-text" onClick={() => { setBlSearchInput(''); setBlSearch(''); setBlPage(1) }}>
+                    Clear
+                  </button>
+                ) : null}
+              </form>
+              <span className="ml-auto text-xs text-app-secondary">
+                {filteredLines.length === 0 ? 'No results' : `${blStartItem}–${blEndItem} of ${filteredLines.length} lines`}
+              </span>
+            </div>
+
             {/* Table */}
             <div className="overflow-hidden rounded-xl border border-app-border shadow-sm">
               <Table>
@@ -948,7 +993,7 @@ export function SalesProposalWorkspacePage() {
                   </TR>
                 </THead>
                 <TBody>
-                  {budgetLines.map((row, idx) => {
+                  {pagedLines.map((row, idx) => {
                     const key = `bl-${row.id}`
                     return (
                       <TR key={row.id} className={`transition-colors hover:bg-app-muted/50 ${idx % 2 === 0 ? 'bg-app-surface' : 'bg-slate-50/50 dark:bg-slate-800/20'}`}>
@@ -1028,6 +1073,48 @@ export function SalesProposalWorkspacePage() {
                   })}
                 </TBody>
               </Table>
+
+              {/* Pagination footer */}
+              {filteredLines.length > blPageSize || blTotalPages > 1 ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-app-border px-4 py-2">
+                  <div className="flex items-center gap-2 text-xs text-app-secondary">
+                    <span>Rows per page:</span>
+                    {BL_PAGE_SIZES.map((ps) => (
+                      <button
+                        key={ps}
+                        type="button"
+                        onClick={() => { setBlPageSize(ps); setBlPage(1) }}
+                        className={`rounded px-2 py-0.5 transition-colors ${
+                          blPageSize === ps
+                            ? 'bg-brand-600 text-white'
+                            : 'hover:bg-app-muted text-app-secondary'
+                        }`}
+                      >
+                        {ps}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="text-app-secondary">Page {blPage} of {blTotalPages}</span>
+                    <button
+                      type="button"
+                      disabled={blPage <= 1}
+                      onClick={() => setBlPage((p) => p - 1)}
+                      className="rounded border border-app-border px-2 py-0.5 text-app-secondary hover:bg-app-muted disabled:opacity-40"
+                    >
+                      ← Prev
+                    </button>
+                    <button
+                      type="button"
+                      disabled={blPage >= blTotalPages}
+                      onClick={() => setBlPage((p) => p + 1)}
+                      className="rounded border border-app-border px-2 py-0.5 text-app-secondary hover:bg-app-muted disabled:opacity-40"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </>
         )}

@@ -16,6 +16,7 @@ Capability map:
 
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -389,6 +390,21 @@ class SiteSurveyViewSet(ScopedModelViewSet):
 
 # ─── SalesRoleRequirementViewSet ──────────────────────────────────────────────
 
+class NoPagination(PageNumberPagination):
+    """Used for per-proposal views where all rows must load at once for inline editing."""
+    page_size = None
+
+    def paginate_queryset(self, queryset, request, view=None):
+        # Returns None → DRF skips pagination and returns a plain list
+        return None
+
+
+class SalesRoleRequirementPagination(PageNumberPagination):
+    page_size = 25
+    page_size_query_param = 'page_size'
+    max_page_size = 500
+
+
 class SalesRoleRequirementViewSet(ScopedModelViewSet):
     queryset = SalesRoleRequirement.objects.select_related(
         'lead', 'site', 'survey', 'job_role', 'wage_category',
@@ -396,8 +412,10 @@ class SalesRoleRequirementViewSet(ScopedModelViewSet):
 
     permission_classes = [IsAuthenticated, HasCapability]
     scope_filter = filter_sales_role_requirements_for_user
+    pagination_class = SalesRoleRequirementPagination
 
     filterset_fields = ['lead', 'site', 'survey', 'job_role', 'is_active']
+    search_fields = ['job_role__name', 'site__name']
 
     action_required_capabilities = {
         'list':           'sales_survey.read',
@@ -677,8 +695,10 @@ class ProposalBudgetLineViewSet(ScopedModelViewSet):
 
     permission_classes = [IsAuthenticated, HasCapability]
     scope_filter = filter_proposal_budget_lines_for_user
+    pagination_class = NoPagination
 
     filterset_fields = ['proposal_version', 'site', 'job_role']
+    search_fields = ['job_role__name', 'site__name']
 
     action_required_capabilities = {
         'list':           'sales_proposal.read',
@@ -724,8 +744,10 @@ class ProposalBreakupLineViewSet(ScopedModelViewSet):
 
     permission_classes = [IsAuthenticated, HasCapability]
     scope_filter = filter_proposal_breakup_lines_for_user
+    pagination_class = NoPagination
 
     filterset_fields = ['proposal_version', 'site', 'job_role', 'component_type']
+    search_fields = ['job_role__name', 'site__name']
 
     action_required_capabilities = {
         'list':           'sales_proposal.read',
@@ -868,6 +890,9 @@ class _SurveyChildViewSetBase(ScopedModelViewSet):
         'update':         'sales_survey.update',
         'partial_update': 'sales_survey.update',
         'destroy':        'sales_survey.update',
+        'bulk_apply_range': 'sales_survey.update',
+        'import_all_mapped_roles': 'sales_survey.update',
+        'quick_actions': 'sales_survey.update',
     }
 
 
@@ -887,6 +912,297 @@ class SiteSurveyShiftDeploymentViewSet(_SurveyChildViewSetBase):
     serializer_class = SiteSurveyShiftDeploymentSerializer
     filterset_fields = ['survey', 'line_type', 'job_role']
     search_fields = ['description', 'job_role__name', 'job_role__code']
+
+    @action(detail=False, methods=['post'], url_path='bulk-apply-range')
+    def bulk_apply_range(self, request):
+        from decimal import Decimal, InvalidOperation
+        from django.db import transaction
+
+        survey_id = request.data.get('survey')
+        if not survey_id:
+            return Response({'detail': 'survey is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        survey = SiteSurvey.objects.filter(pk=survey_id).select_related('lead').first()
+        if not survey:
+            return Response({'detail': 'Site survey not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_superuser:
+            user_org_id = getattr(request.user, 'org_id', None)
+            if not user_org_id or survey.lead.org_id != user_org_id:
+                return Response({'detail': 'Forbidden.'}, status=status.HTTP_403_FORBIDDEN)
+
+        def _parse_decimal(val, field_name):
+            if val is None or val == '':
+                return Decimal('0')
+            try:
+                dec = Decimal(str(val))
+                if dec < 0:
+                    raise ValueError(f'{field_name} cannot be negative.')
+                return dec
+            except (InvalidOperation, ValueError):
+                raise ValueError(f'Invalid value for {field_name}.')
+
+        try:
+            general_count = _parse_decimal(request.data.get('general_count', 0), 'general_count')
+            first_shift_count = _parse_decimal(request.data.get('first_shift_count', 0), 'first_shift_count')
+            second_shift_count = _parse_decimal(request.data.get('second_shift_count', 0), 'second_shift_count')
+            night_shift_count = _parse_decimal(request.data.get('night_shift_count', 0), 'night_shift_count')
+        except ValueError as err:
+            return Response({'detail': str(err)}, status=status.HTTP_400_BAD_REQUEST)
+
+        remarks = request.data.get('remarks')
+        deployment_ids = request.data.get('deployment_ids')
+        target_mode = request.data.get('target_mode', 'mapped')
+
+        base_qs = self.filter_queryset(self.get_queryset()).filter(
+            survey=survey,
+            line_type='item',
+            is_applicable=True,
+        )
+
+        if deployment_ids and isinstance(deployment_ids, (list, tuple)):
+            target_qs = base_qs.filter(id__in=deployment_ids)
+        elif target_mode == 'mapped':
+            from django.db.models import Q
+            org = getattr(survey.lead, 'org', None)
+            mappings_qs = SurveyRoleMapping.objects.filter(is_active=True)
+            if org:
+                mappings_qs = mappings_qs.filter(Q(org=org) | Q(org__isnull=True))
+            active_mapping_descs = set(mappings_qs.values_list('description_text', flat=True))
+            normalized_descs = {d.strip().lower() for d in active_mapping_descs if d}
+
+            all_rows = list(base_qs)
+            target_ids = [
+                row.id for row in all_rows
+                if row.job_role_id is not None
+                or (row.description and row.description.strip().lower() in normalized_descs)
+            ]
+            target_qs = base_qs.filter(id__in=target_ids)
+        else:
+            target_qs = base_qs
+
+        with transaction.atomic():
+            target_rows = list(target_qs.select_for_update())
+            for row in target_rows:
+                row.general_count = general_count
+                row.first_shift_count = first_shift_count
+                row.second_shift_count = second_shift_count
+                row.night_shift_count = night_shift_count
+                reliever = row.reliever_count or Decimal('0')
+                row.total_count = general_count + first_shift_count + second_shift_count + night_shift_count + reliever
+                if remarks is not None and str(remarks).strip():
+                    row.remarks = str(remarks).strip()
+
+            fields_to_update = ['general_count', 'first_shift_count', 'second_shift_count', 'night_shift_count', 'total_count', 'updated_at']
+            if remarks is not None and str(remarks).strip():
+                fields_to_update.append('remarks')
+            SiteSurveyShiftDeployment.objects.bulk_update(target_rows, fields_to_update)
+
+        serializer = SiteSurveyShiftDeploymentSerializer(target_rows, many=True, context=self.get_serializer_context())
+        return Response({
+            'count': len(target_rows),
+            'items': serializer.data,
+            'message': f'Successfully applied shift range to {len(target_rows)} mapped roles.',
+        })
+
+    @action(detail=False, methods=['post'], url_path='import-all-mapped-roles')
+    def import_all_mapped_roles(self, request):
+        from decimal import Decimal
+        from django.db import transaction
+        from apps.jobs.models import JobRole
+
+        survey_id = request.data.get('survey')
+        if not survey_id:
+            return Response({'detail': 'survey is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        survey = SiteSurvey.objects.filter(pk=survey_id).select_related('lead', 'lead__org').first()
+        if not survey:
+            return Response({'detail': 'Site survey not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_superuser:
+            user_org_id = getattr(request.user, 'org_id', None)
+            if not user_org_id or survey.lead.org_id != user_org_id:
+                return Response({'detail': 'Forbidden.'}, status=status.HTTP_403_FORBIDDEN)
+
+        org = survey.lead.org
+
+        def _parse_dec(v):
+            try:
+                d = Decimal(str(v or 0))
+                return max(Decimal('0'), d)
+            except Exception:
+                return Decimal('0')
+
+        general_count = _parse_dec(request.data.get('general_count', 0))
+        first_shift_count = _parse_dec(request.data.get('first_shift_count', 0))
+        second_shift_count = _parse_dec(request.data.get('second_shift_count', 0))
+        night_shift_count = _parse_dec(request.data.get('night_shift_count', 0))
+        remarks = str(request.data.get('remarks', '') or '').strip()
+        total_count = general_count + first_shift_count + second_shift_count + night_shift_count
+
+        existing_role_ids = set(
+            SiteSurveyShiftDeployment.objects.filter(survey=survey)
+            .exclude(job_role__isnull=True)
+            .values_list('job_role_id', flat=True)
+        )
+        existing_descs = set(
+            d.strip().lower() for d in
+            SiteSurveyShiftDeployment.objects.filter(survey=survey)
+            .values_list('description', flat=True)
+            if d
+        )
+
+        from django.db.models import Q
+        mappings_qs = SurveyRoleMapping.objects.filter(is_active=True)
+        if org:
+            mappings_qs = mappings_qs.filter(Q(org=org) | Q(org__isnull=True))
+        mappings = list(mappings_qs.select_related('job_role').order_by('description_text'))
+
+        job_roles_qs = JobRole.objects.filter(is_active=True)
+        if org:
+            job_roles_qs = job_roles_qs.filter(Q(org=org) | Q(org__isnull=True))
+        job_roles = list(job_roles_qs.order_by('name'))
+        if not job_roles:
+            job_roles = list(JobRole.objects.filter(is_active=True).order_by('name'))
+
+        filter_job_role_ids = request.data.get('job_role_ids')
+        if filter_job_role_ids and isinstance(filter_job_role_ids, (list, tuple)):
+            filter_set = set(int(x) for x in filter_job_role_ids if str(x).isdigit())
+            if filter_set:
+                job_roles = [r for r in job_roles if r.id in filter_set]
+                mappings = [m for m in mappings if m.job_role_id in filter_set]
+
+        to_create = []
+        max_sort = SiteSurveyShiftDeployment.objects.filter(survey=survey).count()
+        added_role_ids = set(existing_role_ids)
+        added_descs = set(existing_descs)
+
+        for m in mappings:
+            desc_norm = m.description_text.strip().lower()
+            if (m.job_role_id and m.job_role_id in added_role_ids) or desc_norm in added_descs:
+                continue
+            max_sort += 1
+            to_create.append(SiteSurveyShiftDeployment(
+                survey=survey,
+                job_role=m.job_role,
+                description=m.description_text,
+                general_count=general_count,
+                first_shift_count=first_shift_count,
+                second_shift_count=second_shift_count,
+                night_shift_count=night_shift_count,
+                total_count=total_count,
+                remarks=remarks,
+                line_type='item',
+                is_applicable=bool(total_count > 0),
+                sort_order=max_sort,
+            ))
+            if m.job_role_id:
+                added_role_ids.add(m.job_role_id)
+            added_descs.add(desc_norm)
+
+        for r in job_roles:
+            desc_norm = r.name.strip().lower()
+            if r.id in added_role_ids or desc_norm in added_descs:
+                continue
+            max_sort += 1
+            to_create.append(SiteSurveyShiftDeployment(
+                survey=survey,
+                job_role=r,
+                description=r.name,
+                general_count=general_count,
+                first_shift_count=first_shift_count,
+                second_shift_count=second_shift_count,
+                night_shift_count=night_shift_count,
+                total_count=total_count,
+                remarks=remarks,
+                line_type='item',
+                is_applicable=bool(total_count > 0),
+                sort_order=max_sort,
+            ))
+            added_role_ids.add(r.id)
+            added_descs.add(desc_norm)
+
+        with transaction.atomic():
+            if to_create:
+                SiteSurveyShiftDeployment.objects.bulk_create(to_create)
+
+        all_deployments = list(
+            SiteSurveyShiftDeployment.objects.filter(survey=survey)
+            .select_related('job_role')
+            .order_by('sort_order', 'id')
+        )
+        serializer = SiteSurveyShiftDeploymentSerializer(all_deployments, many=True, context=self.get_serializer_context())
+        return Response({
+            'added_count': len(to_create),
+            'total_count': len(all_deployments),
+            'items': serializer.data,
+            'message': f'Successfully imported {len(to_create)} roles into survey.',
+        })
+
+    @action(detail=False, methods=['post'], url_path='quick-actions')
+    def quick_actions(self, request):
+        from django.db import transaction
+        from django.db.models import Q
+
+        survey_id = request.data.get('survey')
+        action_name = request.data.get('action')
+
+        if not survey_id:
+            return Response({'detail': 'survey is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not action_name:
+            return Response({'detail': 'action is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        survey = SiteSurvey.objects.filter(pk=survey_id).select_related('lead').first()
+        if not survey:
+            return Response({'detail': 'Site survey not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_superuser:
+            user_org_id = getattr(request.user, 'org_id', None)
+            if not user_org_id or survey.lead.org_id != user_org_id:
+                return Response({'detail': 'Forbidden.'}, status=status.HTTP_403_FORBIDDEN)
+
+        base_qs = SiteSurveyShiftDeployment.objects.filter(survey=survey, line_type='item')
+        msg = ''
+        with transaction.atomic():
+            if action_name == 'turn_off_unused':
+                cnt = base_qs.filter(
+                    Q(total_count=0) | Q(total_count__isnull=True),
+                    is_applicable=True,
+                ).update(is_applicable=False)
+                msg = f'Turned off {cnt} unassigned roles.'
+            elif action_name == 'turn_all_off':
+                cnt = base_qs.filter(is_applicable=True).update(is_applicable=False)
+                msg = f'Turned off all {cnt} roles.'
+            elif action_name == 'turn_all_on':
+                cnt = base_qs.filter(is_applicable=False).update(is_applicable=True)
+                msg = f'Turned on all {cnt} roles.'
+            elif action_name == 'turn_selected_on':
+                dep_ids = request.data.get('deployment_ids', [])
+                cnt = base_qs.filter(id__in=dep_ids, is_applicable=False).update(is_applicable=True)
+                msg = f'Turned on {cnt} selected roles.'
+            elif action_name == 'turn_selected_off':
+                dep_ids = request.data.get('deployment_ids', [])
+                cnt = base_qs.filter(id__in=dep_ids, is_applicable=True).update(is_applicable=False)
+                msg = f'Turned off {cnt} selected roles.'
+            elif action_name == 'remove_unused':
+                cnt, _ = base_qs.filter(
+                    Q(total_count=0) | Q(total_count__isnull=True),
+                ).delete()
+                msg = f'Removed {cnt} unassigned roles from survey.'
+            else:
+                return Response({'detail': f'Unknown action: {action_name}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        all_deployments = list(
+            SiteSurveyShiftDeployment.objects.filter(survey=survey)
+            .select_related('job_role')
+            .order_by('sort_order', 'id')
+        )
+        serializer = SiteSurveyShiftDeploymentSerializer(all_deployments, many=True, context=self.get_serializer_context())
+        return Response({
+            'action': action_name,
+            'items': serializer.data,
+            'message': msg,
+        })
 
 
 class SiteSurveyLocationLineViewSet(_SurveyChildViewSetBase):
@@ -916,13 +1232,20 @@ class SiteSurveyIssueLineViewSet(_SurveyChildViewSetBase):
     search_fields = ['issue', 'improvement_details']
 
 
-# ─── Phase H: Proposal component rules ────────────────────────────────────────
+
+
+class SurveyRoleMappingPagination(PageNumberPagination):
+    page_size = 1000
+    page_size_query_param = 'page_size'
+    max_page_size = 2000
+
 
 class SurveyRoleMappingViewSet(ScopedModelViewSet):
     queryset = SurveyRoleMapping.objects.select_related(
         'org', 'job_role', 'wage_category',
     ).order_by('description_text')
     serializer_class = SurveyRoleMappingSerializer
+    pagination_class = SurveyRoleMappingPagination
     permission_classes = [IsAuthenticated, HasCapability]
     scope_filter = filter_survey_role_mappings_for_user
     filterset_fields = ['org', 'job_role', 'wage_category', 'service_category', 'is_active']

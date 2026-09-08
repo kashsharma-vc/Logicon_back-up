@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import axios from 'axios'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { getPublicProposalResponse, submitPublicProposalResponse } from '@/api/publicSales'
 import { parseApiError } from '@/lib/apiError'
 import { Spinner } from '@/components/ui/Spinner'
@@ -251,6 +251,16 @@ export function PublicProposalResponsePage() {
   const [proposalData, setProposalData] = useState<PublicProposalResponse | null>(null)
   const [breakupExpanded, setBreakupExpanded] = useState(false)
 
+  // Budget Lines pagination and filtering
+  const [budgetSearch, setBudgetSearch] = useState('')
+  const [budgetPage, setBudgetPage] = useState(1)
+  const [budgetPageSize, setBudgetPageSize] = useState<number>(10)
+
+  // Salary Breakup pagination and filtering
+  const [breakupSearch, setBreakupSearch] = useState('')
+  const [breakupPage, setBreakupPage] = useState(1)
+  const [breakupPageSize, setBreakupPageSize] = useState<number>(5)
+
   const [form, setForm] = useState<FormState>({
     response: '',
     respondent_name: '',
@@ -469,6 +479,44 @@ export function PublicProposalResponsePage() {
   const breakupRoleGroups = buildBreakupRoleGroups(groupedBreakupLines, groupedBudgetLines)
   const unmappedBreakupLines = getUnmappedBreakupLines(groupedBreakupLines)
 
+  const BUDGET_PAGE_SIZES = [5, 10, 25, 50] as const
+  const BREAKUP_PAGE_SIZES = [3, 5, 10, 20] as const
+
+  const filteredBudgetLines = budgetLines.filter((r) => {
+    if (!budgetSearch.trim()) return true
+    const q = budgetSearch.toLowerCase()
+    return (
+      (r.description ?? '').toLowerCase().includes(q) ||
+      (r.service_category ?? '').toLowerCase().includes(q) ||
+      (r.job_role_name ?? '').toLowerCase().includes(q)
+    )
+  })
+  const budgetTotalPages = Math.max(1, Math.ceil(filteredBudgetLines.length / budgetPageSize))
+  const safeBudgetPage = Math.min(budgetPage, budgetTotalPages)
+  const budgetStart = (safeBudgetPage - 1) * budgetPageSize
+  const pagedBudgetLines = filteredBudgetLines.slice(budgetStart, budgetStart + budgetPageSize)
+  const budgetStartItem = filteredBudgetLines.length === 0 ? 0 : budgetStart + 1
+  const budgetEndItem = Math.min(budgetStart + budgetPageSize, filteredBudgetLines.length)
+
+  const indexedBreakupGroups = breakupRoleGroups.map((group, originalIndex) => ({
+    group,
+    originalIndex,
+  }))
+  const filteredBreakupGroups = indexedBreakupGroups.filter(({ group }) => {
+    if (!breakupSearch.trim()) return true
+    const q = breakupSearch.toLowerCase()
+    return (
+      group.title.toLowerCase().includes(q) ||
+      (group.siteName ?? '').toLowerCase().includes(q)
+    )
+  })
+  const breakupTotalPages = Math.max(1, Math.ceil(filteredBreakupGroups.length / breakupPageSize))
+  const safeBreakupPage = Math.min(breakupPage, breakupTotalPages)
+  const breakupStart = (safeBreakupPage - 1) * breakupPageSize
+  const pagedBreakupGroups = filteredBreakupGroups.slice(breakupStart, breakupStart + breakupPageSize)
+  const breakupStartItem = filteredBreakupGroups.length === 0 ? 0 : breakupStart + 1
+  const breakupEndItem = Math.min(breakupStart + breakupPageSize, filteredBreakupGroups.length)
+
   return (
     <PublicShell subtitle="Proposal Review">
       {/* Proposal header */}
@@ -538,46 +586,126 @@ export function PublicProposalResponsePage() {
       {/* Budget Lines */}
       {budgetLines.length > 0 ? (
         <SectionCard title="Budget lines">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-app-border text-left">
-                  <th className="pb-2 pr-4 text-xs font-semibold text-app-subtle">Description</th>
-                  {budgetLines.some((r) => r.service_category) ? (
-                    <th className="pb-2 pr-4 text-xs font-semibold text-app-subtle">Category</th>
-                  ) : null}
-                  <th className="pb-2 pr-4 text-right text-xs font-semibold text-app-subtle">Manpower</th>
-                  {budgetLines.some((r) => r.unit_cost) ? (
-                    <th className="pb-2 pr-4 text-right text-xs font-semibold text-app-subtle">Unit cost</th>
-                  ) : null}
-                  {budgetLines.some((r) => r.total_cost) ? (
-                    <th className="pb-2 text-right text-xs font-semibold text-app-subtle">Total cost</th>
-                  ) : null}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-app-border">
-                {budgetLines.map((row) => (
-                  <tr key={row.id}>
-                    <td className="py-2.5 pr-4 font-medium text-app-text">{row.description ?? '—'}</td>
+          {/* Search & page size selector */}
+          {budgetLines.length > 5 ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative min-w-[200px] max-w-xs flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle" />
+                <input
+                  type="text"
+                  placeholder="Filter roles..."
+                  value={budgetSearch}
+                  onChange={(e) => {
+                    setBudgetSearch(e.target.value)
+                    setBudgetPage(1)
+                  }}
+                  className="w-full rounded-lg border border-app-border bg-app-bg py-1.5 pl-8 pr-3 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-app-secondary">
+                <span>Rows:</span>
+                {BUDGET_PAGE_SIZES.map((ps) => (
+                  <button
+                    key={ps}
+                    type="button"
+                    onClick={() => {
+                      setBudgetPageSize(ps)
+                      setBudgetPage(1)
+                    }}
+                    className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                      budgetPageSize === ps
+                        ? 'bg-brand-600 text-white'
+                        : 'border border-app-border text-app-secondary hover:bg-app-muted'
+                    }`}
+                  >
+                    {ps}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {pagedBudgetLines.length === 0 ? (
+            <div className="rounded-lg border border-app-border bg-app-bg p-6 text-center text-xs text-app-secondary">
+              No roles matching "{budgetSearch}".
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-app-border text-left">
+                    <th className="pb-2 pr-4 text-xs font-semibold text-app-subtle">Description</th>
                     {budgetLines.some((r) => r.service_category) ? (
-                      <td className="py-2.5 pr-4 text-app-secondary">{row.service_category ?? '—'}</td>
+                      <th className="pb-2 pr-4 text-xs font-semibold text-app-subtle">Category</th>
                     ) : null}
-                    <td className="py-2.5 pr-4 text-right text-app-secondary">{row.manpower_count ?? '—'}</td>
+                    <th className="pb-2 pr-4 text-right text-xs font-semibold text-app-subtle">Manpower</th>
                     {budgetLines.some((r) => r.unit_cost) ? (
-                      <td className="py-2.5 pr-4 text-right text-app-secondary">
-                        {row.unit_cost ? formatCurrency(row.unit_cost) : '—'}
-                      </td>
+                      <th className="pb-2 pr-4 text-right text-xs font-semibold text-app-subtle">Unit cost</th>
                     ) : null}
                     {budgetLines.some((r) => r.total_cost) ? (
-                      <td className="py-2.5 text-right text-app-secondary">
-                        {row.total_cost ? formatCurrency(row.total_cost) : '—'}
-                      </td>
+                      <th className="pb-2 text-right text-xs font-semibold text-app-subtle">Total cost</th>
                     ) : null}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-app-border">
+                  {pagedBudgetLines.map((row) => (
+                    <tr key={row.id}>
+                      <td className="py-2.5 pr-4 font-medium text-app-text">{row.description ?? '—'}</td>
+                      {budgetLines.some((r) => r.service_category) ? (
+                        <td className="py-2.5 pr-4 text-app-secondary">{row.service_category ?? '—'}</td>
+                      ) : null}
+                      <td className="py-2.5 pr-4 text-right text-app-secondary">{row.manpower_count ?? '—'}</td>
+                      {budgetLines.some((r) => r.unit_cost) ? (
+                        <td className="py-2.5 pr-4 text-right text-app-secondary">
+                          {row.unit_cost ? formatCurrency(row.unit_cost) : '—'}
+                        </td>
+                      ) : null}
+                      {budgetLines.some((r) => r.total_cost) ? (
+                        <td className="py-2.5 text-right text-app-secondary">
+                          {row.total_cost ? formatCurrency(row.total_cost) : '—'}
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Budget Lines Pagination footer */}
+          {filteredBudgetLines.length > budgetPageSize || budgetTotalPages > 1 ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-app-border pt-3">
+              <p className="text-xs text-app-secondary">
+                Showing <span className="font-medium text-app-text">{budgetStartItem}</span> to{' '}
+                <span className="font-medium text-app-text">{budgetEndItem}</span> of{' '}
+                <span className="font-medium text-app-text">{filteredBudgetLines.length}</span> roles
+                {budgetSearch && filteredBudgetLines.length !== budgetLines.length ? ` (filtered from ${budgetLines.length})` : ''}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={safeBudgetPage <= 1}
+                  onClick={() => setBudgetPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Prev
+                </button>
+                <span className="rounded bg-app-muted px-2.5 py-1 text-xs font-semibold text-app-text">
+                  Page {safeBudgetPage} of {budgetTotalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safeBudgetPage >= budgetTotalPages}
+                  onClick={() => setBudgetPage((p) => Math.min(budgetTotalPages, p + 1))}
+                  className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : null}
         </SectionCard>
       ) : null}
 
@@ -606,87 +734,166 @@ export function PublicProposalResponsePage() {
               </div>
             ) : (
               <div className="space-y-4">
-              <div className="rounded-lg border border-app-border bg-app-bg px-3 py-2">
-                <p className="text-xs font-medium text-app-secondary">
-                  {breakupRoleGroups.length} role{breakupRoleGroups.length !== 1 ? 's' : ''} - {breakupLines.length} component
-                  {breakupLines.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-
-              {breakupRoleGroups.map((group, groupIndex) => {
-                const band = getBreakupRoleBandStyle(groupIndex, group.groupKey)
-                return (
-                  <section
-                    key={group.groupKey}
-                    className={`overflow-hidden rounded-lg border border-l-4 shadow-sm ${band.border} ${band.borderAccent}`}
-                  >
-                    <div className={`border-b px-4 py-3 ${band.headerBg} ${band.headerBorder}`}>
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className={`text-sm font-semibold ${band.titleText}`}>{group.title}</p>
-                          <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs ${band.metaText}`}>
-                            {group.siteName ? <span>{group.siteName}</span> : null}
-                            {group.headcount != null ? <span>Headcount {group.headcount}</span> : null}
-                            {group.unitCost ? <span>Unit {formatCurrency(group.unitCost)}</span> : null}
-                            {group.totalCost ? <span>Budget {formatCurrency(group.totalCost)}</span> : null}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">
-                            Role total
-                          </p>
-                          <p className={`text-sm font-bold tabular-nums ${band.totalText}`}>
-                            {formatCurrency(String(group.total))}
-                          </p>
-                        </div>
-                      </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-app-border bg-app-bg px-3 py-2">
+                  <p className="text-xs font-medium text-app-secondary">
+                    {breakupRoleGroups.length} role{breakupRoleGroups.length !== 1 ? 's' : ''} · {breakupLines.length} component
+                    {breakupLines.length !== 1 ? 's' : ''}
+                  </p>
+                  {breakupRoleGroups.length > 3 ? (
+                    <div className="flex items-center gap-1.5 text-xs text-app-secondary">
+                      <span>Roles per page:</span>
+                      {BREAKUP_PAGE_SIZES.map((ps) => (
+                        <button
+                          key={ps}
+                          type="button"
+                          onClick={() => {
+                            setBreakupPageSize(ps)
+                            setBreakupPage(1)
+                          }}
+                          className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                            breakupPageSize === ps
+                              ? 'bg-brand-600 text-white'
+                              : 'border border-app-border text-app-secondary hover:bg-app-muted'
+                          }`}
+                        >
+                          {ps}
+                        </button>
+                      ))}
                     </div>
+                  ) : null}
+                </div>
 
-                    <div className={`space-y-3 p-3 ${band.bodyBg}`}>
-                      {group.sections.map((section) => {
-                        const sectionStyle = getBreakupComponentStyle(section.componentType)
-                        return (
-                          <div
-                            key={`${group.groupKey}-${section.componentType}`}
-                            className="overflow-hidden rounded-lg border border-app-border bg-app-surface"
-                          >
-                            <div className={`flex items-center justify-between border-b px-3 py-2 ${sectionStyle.border}`}>
-                              <p className={`text-xs font-semibold ${sectionStyle.text}`}>{section.label}</p>
-                              <p className="text-xs font-semibold tabular-nums text-app-text">
-                                {formatCurrency(String(section.total))}
+                {breakupRoleGroups.length > 3 ? (
+                  <div className="relative max-w-xs">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-subtle" />
+                    <input
+                      type="text"
+                      placeholder="Filter salary breakup by role..."
+                      value={breakupSearch}
+                      onChange={(e) => {
+                        setBreakupSearch(e.target.value)
+                        setBreakupPage(1)
+                      }}
+                      className="w-full rounded-lg border border-app-border bg-app-bg py-1.5 pl-8 pr-3 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                ) : null}
+
+                {pagedBreakupGroups.length === 0 ? (
+                  <div className="rounded-lg border border-app-border bg-app-bg p-6 text-center text-xs text-app-secondary">
+                    No roles matching "{breakupSearch}".
+                  </div>
+                ) : (
+                  pagedBreakupGroups.map(({ group, originalIndex }) => {
+                    const band = getBreakupRoleBandStyle(originalIndex, group.groupKey)
+                    return (
+                      <section
+                        key={group.groupKey}
+                        className={`overflow-hidden rounded-lg border border-l-4 shadow-sm ${band.border} ${band.borderAccent}`}
+                      >
+                        <div className={`border-b px-4 py-3 ${band.headerBg} ${band.headerBorder}`}>
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className={`text-sm font-semibold ${band.titleText}`}>{group.title}</p>
+                              <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs ${band.metaText}`}>
+                                {group.siteName ? <span>{group.siteName}</span> : null}
+                                {group.headcount != null ? <span>Headcount {group.headcount}</span> : null}
+                                {group.unitCost ? <span>Unit {formatCurrency(group.unitCost)}</span> : null}
+                                {group.totalCost ? <span>Budget {formatCurrency(group.totalCost)}</span> : null}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">
+                                Role total
+                              </p>
+                              <p className={`text-sm font-bold tabular-nums ${band.totalText}`}>
+                                {formatCurrency(String(group.total))}
                               </p>
                             </div>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="border-b border-app-border text-left">
-                                    <th className="px-3 py-2 text-xs font-semibold text-app-subtle">Component</th>
-                                    <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle">%</th>
-                                    <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle">Amount</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-app-border">
-                                  {section.rows.map((row) => (
-                                    <tr key={row.id}>
-                                      <td className="px-3 py-2.5 font-medium text-app-text">{row.component_name ?? '-'}</td>
-                                      <td className="px-3 py-2.5 text-right text-app-secondary">
-                                        {row.percentage != null ? `${row.percentage}%` : '-'}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right text-app-secondary">
-                                        {row.amount ? formatCurrency(row.amount) : '-'}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
                           </div>
-                        )
-                      })}
+                        </div>
+
+                        <div className={`space-y-3 p-3 ${band.bodyBg}`}>
+                          {group.sections.map((section) => {
+                            const sectionStyle = getBreakupComponentStyle(section.componentType)
+                            return (
+                              <div
+                                key={`${group.groupKey}-${section.componentType}`}
+                                className="overflow-hidden rounded-lg border border-app-border bg-app-surface"
+                              >
+                                <div className={`flex items-center justify-between border-b px-3 py-2 ${sectionStyle.border}`}>
+                                  <p className={`text-xs font-semibold ${sectionStyle.text}`}>{section.label}</p>
+                                  <p className="text-xs font-semibold tabular-nums text-app-text">
+                                    {formatCurrency(String(section.total))}
+                                  </p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm">
+                                    <thead>
+                                      <tr className="border-b border-app-border text-left">
+                                        <th className="px-3 py-2 text-xs font-semibold text-app-subtle">Component</th>
+                                        <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle">%</th>
+                                        <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle">Amount</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-app-border">
+                                      {section.rows.map((row) => (
+                                        <tr key={row.id}>
+                                          <td className="px-3 py-2.5 font-medium text-app-text">{row.component_name ?? '-'}</td>
+                                          <td className="px-3 py-2.5 text-right text-app-secondary">
+                                            {row.percentage != null ? `${row.percentage}%` : '-'}
+                                          </td>
+                                          <td className="px-3 py-2.5 text-right text-app-secondary">
+                                            {row.amount ? formatCurrency(row.amount) : '-'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </section>
+                    )
+                  })
+                )}
+
+                {/* Salary Breakup Pagination footer */}
+                {filteredBreakupGroups.length > breakupPageSize || breakupTotalPages > 1 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-app-border pt-3">
+                    <p className="text-xs text-app-secondary">
+                      Showing role <span className="font-medium text-app-text">{breakupStartItem}</span> to{' '}
+                      <span className="font-medium text-app-text">{breakupEndItem}</span> of{' '}
+                      <span className="font-medium text-app-text">{filteredBreakupGroups.length}</span> roles
+                      {breakupSearch && filteredBreakupGroups.length !== breakupRoleGroups.length ? ` (filtered from ${breakupRoleGroups.length})` : ''}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={safeBreakupPage <= 1}
+                        onClick={() => setBreakupPage((p) => Math.max(1, p - 1))}
+                        className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                        Prev
+                      </button>
+                      <span className="rounded bg-app-muted px-2.5 py-1 text-xs font-semibold text-app-text">
+                        Page {safeBreakupPage} of {breakupTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={safeBreakupPage >= breakupTotalPages}
+                        onClick={() => setBreakupPage((p) => Math.min(breakupTotalPages, p + 1))}
+                        className="inline-flex items-center gap-1 rounded border border-app-border bg-app-surface px-2.5 py-1 text-xs font-medium text-app-text hover:bg-app-muted disabled:opacity-40"
+                      >
+                        Next
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                  </section>
-                )
-              })}
+                  </div>
+                ) : null}
               </div>
             )
           ) : (

@@ -505,3 +505,46 @@ class TestPublicSubmission(TestCase):
         self.assertEqual(detail_data['job_role_code'], self.job_role.code)
         self.assertEqual(detail_data['campaign_name'], self.campaign.name)
         self.assertEqual(detail_data['campaign_title'], self.campaign.title)
+
+    def test_image_file_upload_rejected_with_fallback_message(self):
+        FormField.objects.create(
+            campaign=self.campaign, role=None,
+            label='Resume', field_key='resume', field_type='file',
+            sort_order=5, is_required=True, is_active=True,
+            options=[],
+        )
+        png_upload = SimpleUploadedFile(
+            'resume.png',
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRfake',
+            content_type='image/png',
+        )
+        payload = dict(self.valid_payload)
+        payload['mobile_number'] = '9000000088'
+        payload['answers'] = json.dumps(payload['answers'])
+        payload['resume'] = png_upload
+
+        resp = self.api.post('/api/public/submissions/', payload, format='multipart')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Images (PNG, JPG, etc.) are not supported', str(resp.data))
+
+    def test_disguised_image_file_rejected_via_magic_bytes(self):
+        FormField.objects.create(
+            campaign=self.campaign, role=None,
+            label='Resume', field_key='resume', field_type='file',
+            sort_order=5, is_required=True, is_active=True,
+            options=[],
+        )
+        fake_pdf = SimpleUploadedFile(
+            'sneaky.pdf',
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRfake',
+            content_type='application/pdf',
+        )
+        payload = dict(self.valid_payload)
+        payload['mobile_number'] = '9000000087'
+        payload['answers'] = json.dumps(payload['answers'])
+        payload['resume'] = fake_pdf
+
+        resp = self.api.post('/api/public/submissions/', payload, format='multipart')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Images (PNG, JPG, etc.) are not supported', str(resp.data))
+

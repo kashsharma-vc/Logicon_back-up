@@ -1,6 +1,7 @@
-﻿import type { PublicFormField } from '@/features/publicApply/types'
+import type { PublicFormField } from '@/features/publicApply/types'
 
-const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'] as const
+const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx'] as const
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.gif', '.svg'] as const
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 
 export function validateMobile10Digits(value: string): string | null {
@@ -10,8 +11,18 @@ export function validateMobile10Digits(value: string): string | null {
   return null
 }
 
-export function validateFileBasic(file: File): 'fileTooLarge' | 'fileTypeNotAllowed' | null {
+export function validateFileBasic(file: File): 'fileTooLarge' | 'fileTypeNotAllowed' | 'imageNotAllowed' | null {
   const name = file.name.toLowerCase()
+  const mimeType = (file.type || '').toLowerCase()
+
+  const isImage =
+    mimeType.startsWith('image/') ||
+    IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext))
+
+  if (isImage) {
+    return 'imageNotAllowed'
+  }
+
   const okExt = ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext))
   if (!okExt) return 'fileTypeNotAllowed'
   if (file.size > MAX_UPLOAD_SIZE_BYTES) return 'fileTooLarge'

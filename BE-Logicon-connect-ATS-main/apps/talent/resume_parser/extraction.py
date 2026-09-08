@@ -49,6 +49,17 @@ def extract_text_from_bytes(
     file_obj = BytesIO(raw_bytes)
 
     # Determine format
+    is_image = (
+        content_type.startswith('image/')
+        or ext in {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'}
+        or raw_bytes.startswith(b'\x89PNG\r\n\x1a\n')
+        or raw_bytes.startswith(b'\xff\xd8\xff')
+    )
+    if is_image:
+        raise ManualReviewRequired(
+            "Images are not supported for resume text extraction. Please upload a PDF or DOCX file."
+        )
+
     is_pdf = content_type == 'application/pdf' or ext == 'pdf'
     is_docx = (
         content_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -100,7 +111,7 @@ def _extract_pdf(file_obj: BytesIO) -> tuple:
     try:
         reader = PdfReader(file_obj)
         pages = [page.extract_text() or '' for page in reader.pages]
-        raw_text = '\n'.join(pages)
+        raw_text = '\n'.join(pages).replace('\x00', '')
     except Exception as exc:
         raise ManualReviewRequired(f"PDF extraction failed: {exc}")
 
@@ -122,7 +133,7 @@ def _extract_docx(file_obj: BytesIO) -> tuple:
     try:
         doc = Document(file_obj)
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        raw_text = '\n'.join(paragraphs)
+        raw_text = '\n'.join(paragraphs).replace('\x00', '')
     except Exception as exc:
         raise ManualReviewRequired(f"DOCX extraction failed: {exc}")
 
@@ -135,7 +146,7 @@ def _extract_docx(file_obj: BytesIO) -> tuple:
 
 def _extract_plain_text(raw_bytes: bytes) -> tuple:
     try:
-        raw_text = raw_bytes.decode('utf-8', errors='replace')
+        raw_text = raw_bytes.decode('utf-8', errors='replace').replace('\x00', '')
     except Exception as exc:
         raise ManualReviewRequired(f"Text decoding failed: {exc}")
 
@@ -150,6 +161,7 @@ def _extract_plain_text(raw_bytes: bytes) -> tuple:
 
 def _clean_text(text: str) -> str:
     """Strip control characters, collapse excess whitespace."""
+    text = (text or '').replace('\x00', '')
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'[ \t]{3,}', '  ', text)

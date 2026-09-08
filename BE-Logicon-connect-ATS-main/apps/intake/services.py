@@ -29,7 +29,8 @@ from .models import (
 # Constants
 
 _FAKE_NUMBERS = {'0000000000', '1111111111', '1234567890', '9999999999'}
-_ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'}
+_ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx'}
+_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.gif', '.svg'}
 _ALLOWED_CONTENT_TYPES = {
     'application/pdf',
     'application/x-pdf',
@@ -37,12 +38,6 @@ _ALLOWED_CONTENT_TYPES = {
     'application/doc',
     'application/x-msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'image/jpeg',
-    'image/jpg',
-    'image/pjpeg',
-    'image/png',
-    'image/x-png',
-    'text/plain',
     'application/octet-stream',
     'binary/octet-stream',
 }
@@ -314,17 +309,45 @@ def detect_duplicate_submission(candidate, campaign, job_role=None,
 
 # File validation
 
+def _is_image_bytes(uploaded_file) -> bool:
+    try:
+        uploaded_file.seek(0)
+        header = uploaded_file.read(16)
+        uploaded_file.seek(0)
+    except Exception:
+        return False
+    if not header:
+        return False
+    if header.startswith(b'\x89PNG\r\n\x1a\n') or header.startswith(b'\xff\xd8\xff'):
+        return True
+    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a') or header.startswith(b'BM'):
+        return True
+    if header.startswith(b'RIFF') and len(header) >= 12 and header[8:12] == b'WEBP':
+        return True
+    if header.startswith(b'II*\x00') or header.startswith(b'MM\x00*'):
+        return True
+    return False
+
+
 def validate_submission_file(uploaded_file):
     ext = Path(uploaded_file.name).suffix.lower()
+    ct = (getattr(uploaded_file, 'content_type', '') or '').split(';')[0].strip().lower()
+
+    if ext in _IMAGE_EXTENSIONS or ct.startswith('image/') or _is_image_bytes(uploaded_file):
+        raise serializers.ValidationError(
+            "Images (PNG, JPG, etc.) are not supported. Please upload your document in PDF, DOC, or DOCX format."
+        )
+
     if ext not in _ALLOWED_EXTENSIONS:
         raise serializers.ValidationError(
-            f"File '{uploaded_file.name}' has an unsupported file type ({ext}). Allowed types: PDF, DOC, DOCX, JPG, PNG."
+            f"File '{uploaded_file.name}' has an unsupported file type ({ext}). Allowed types: PDF, DOC, DOCX."
         )
-    ct = (getattr(uploaded_file, 'content_type', '') or '').split(';')[0].strip().lower()
-    if ct and ct not in _ALLOWED_CONTENT_TYPES and not ct.startswith('image/') and not ct.startswith('application/'):
+
+    if ct and ct not in _ALLOWED_CONTENT_TYPES:
         raise serializers.ValidationError(
-            f"File '{uploaded_file.name}' has an unsupported content type."
+            f"File '{uploaded_file.name}' has an unsupported content type. Allowed types: PDF, DOC, DOCX."
         )
+
     if uploaded_file.size > MAX_UPLOAD_SIZE_BYTES:
         raise serializers.ValidationError(
             f"File '{uploaded_file.name}' exceeds the 10 MB limit."

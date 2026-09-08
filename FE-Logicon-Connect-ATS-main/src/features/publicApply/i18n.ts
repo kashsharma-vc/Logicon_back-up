@@ -31,6 +31,7 @@ export type I18nKey =
   | 'maxFiles'
   | 'fileTooLarge'
   | 'fileTypeNotAllowed'
+  | 'imageNotAllowed'
   | 'contactDetails'
   | 'applyingFor'
   | 'generalInfo'
@@ -74,13 +75,14 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     joiningPast: 'Joining availability cannot be in the past.',
     maxFiles: 'A maximum of 5 files can be uploaded.',
     fileTooLarge: 'File exceeds the 10 MB limit.',
-    fileTypeNotAllowed: 'Unsupported file type.',
+    fileTypeNotAllowed: 'Unsupported file type. Only PDF, DOC, and DOCX files are allowed.',
+    imageNotAllowed: 'Images (PNG, JPG, etc.) are not supported. Please upload your document as a PDF, DOC, or DOCX file.',
     contactDetails: 'Contact Details',
     applyingFor: 'Applying For',
     generalInfo: 'General Information',
     documents: 'Documents',
     tapToUpload: 'Tap to upload file',
-    uploadHint: 'PDF, DOC, DOCX, JPG, PNG — max 10 MB each, 5 files total',
+    uploadHint: 'PDF, DOC, DOCX — max 10 MB each, 5 files total',
     idProof: 'ID Proof',
     certificate: 'Certificate',
     otherDocs: 'Other Documents',
@@ -117,13 +119,14 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     joiningPast: 'जॉइनिंग तारीख आज से पहले नहीं हो सकती।',
     maxFiles: 'अधिकतम 5 फाइलें अपलोड की जा सकती हैं।',
     fileTooLarge: 'फाइल 10 MB सीमा से बड़ी है।',
-    fileTypeNotAllowed: 'यह फाइल प्रकार समर्थित नहीं है।',
+    fileTypeNotAllowed: 'यह फाइल प्रकार समर्थित नहीं है। केवल PDF, DOC और DOCX फाइलें स्वीकार्य हैं।',
+    imageNotAllowed: 'इमेज फाइलें समर्थित नहीं हैं। कृपया अपना दस्तावेज़ PDF, DOC या DOCX फाइल में अपलोड करें।',
     contactDetails: 'संपर्क विवरण',
     applyingFor: 'किस पद के लिए आवेदन',
     generalInfo: 'सामान्य जानकारी',
     documents: 'दस्तावेज़',
     tapToUpload: 'फाइल अपलोड करने के लिए टैप करें',
-    uploadHint: 'PDF, DOC, DOCX, JPG, PNG — अधिकतम 10 MB प्रति फाइल, 5 फाइलें कुल',
+    uploadHint: 'PDF, DOC, DOCX — अधिकतम 10 MB प्रति फाइल, 5 फाइलें कुल',
     idProof: 'पहचान प्रमाण',
     certificate: 'प्रमाणपत्र',
     otherDocs: 'अन्य दस्तावेज़',
@@ -160,13 +163,14 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     joiningPast: 'जॉइनिंग तारीख आजच्या आधीची असू शकत नाही.',
     maxFiles: 'जास्तीत जास्त 5 फाइल्स अपलोड करता येतील.',
     fileTooLarge: 'फाइल 10 MB मर्यादेपेक्षा मोठी आहे.',
-    fileTypeNotAllowed: 'हा फाइल प्रकार समर्थित नाही.',
+    fileTypeNotAllowed: 'हा फाइल प्रकार समर्थित नाही. फक्त PDF, DOC आणि DOCX फाइल्सना परवानगी आहे.',
+    imageNotAllowed: 'इमेज फाइल्स समर्थित नाहीत. कृपया आपले कागदपत्र PDF, DOC किंवा DOCX फाइलमध्ये अपलोड करा.',
     contactDetails: 'संपर्क तपशील',
     applyingFor: 'कोणत्या पदासाठी अर्ज',
     generalInfo: 'सामान्य माहिती',
     documents: 'कागदपत्रे',
     tapToUpload: 'फाइल अपलोड करण्यासाठी टॅप करा',
-    uploadHint: 'PDF, DOC, DOCX, JPG, PNG — प्रत्येकी जास्तीत जास्त 10 MB, एकूण 5 फाइल्स',
+    uploadHint: 'PDF, DOC, DOCX — प्रत्येकी जास्तीत जास्त 10 MB, एकूण 5 फाइल्स',
     idProof: 'ओळखपत्र',
     certificate: 'प्रमाणपत्र',
     otherDocs: 'इतर कागदपत्रे',

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, FileText, Info, MapPin, Play, Plus, Search, Settings2, Users, Wrench } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Info, MapPin, Play, Plus, Search, Settings2, ToggleLeft, Trash2, Users, Wrench } from 'lucide-react'
 import {
   assignSiteSurveyOwner,
+  bulkApplySurveyDeploymentRange,
   createSiteSurveyEquipmentLine,
   createSiteSurveyIssueLine,
   createSiteSurveyLocationLine,
   createSiteSurveyShiftDeployment,
+  deleteSiteSurveyShiftDeployment,
+  executeSurveyDeploymentsQuickAction,
   generateRoleRequirementsFromSurvey,
   getSiteSurveyStructured,
+  importAllSurveyMappedRoles,
   listEligibleOperationsOwnersForLead,
   listSalesRoleRequirements,
   listSurveyRoleMappings,
@@ -118,9 +122,13 @@ function ApplicableToggle({
   return (
     <button
       type="button"
-      onClick={() => onChange(!value)}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onChange(!value)
+      }}
       disabled={disabled}
-      className={`inline-flex items-center gap-1.5 transition-all duration-150 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      className={`inline-flex items-center gap-1.5 transition-all duration-150 select-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       title={value ? 'Click to disable' : 'Click to enable'}
     >
       {/* Switch track */}
@@ -133,7 +141,7 @@ function ApplicableToggle({
         }`} />
       </span>
       {/* Label */}
-      <span className={`text-xs font-medium ${
+      <span className={`text-xs font-semibold ${
         value ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'
       }`}>
         {value ? 'Yes' : 'N/A'}
@@ -640,9 +648,24 @@ export function SiteSurveyWorkspacePage() {
   const [addIssueOpen, setAddIssueOpen] = useState(false)
   const [jobRoles, setJobRoles] = useState<JobRoleRow[]>([])
   const [jobRolesLoading, setJobRolesLoading] = useState(false)
-  const [selectedJobRoleId, setSelectedJobRoleId] = useState<string>('')
+  const [selectedJobRoleIds, setSelectedJobRoleIds] = useState<number[]>([])
   const [roleSearchQuery, setRoleSearchQuery] = useState<string>('')
   const [importingMappedRoles, setImportingMappedRoles] = useState(false)
+
+  // Bulk shift headcount range state
+  const [bulkGeneral, setBulkGeneral] = useState<number>(0)
+  const [bulkShift1, setBulkShift1] = useState<number>(0)
+  const [bulkShift2, setBulkShift2] = useState<number>(0)
+  const [bulkNight, setBulkNight] = useState<number>(0)
+  const [bulkRemarks, setBulkRemarks] = useState<string>('')
+  const [applyingBulkRange, setApplyingBulkRange] = useState(false)
+  const [bulkRangeFeedback, setBulkRangeFeedback] = useState<string | null>(null)
+  const [quickActionBusy, setQuickActionBusy] = useState<string | null>(null)
+  const [selectedDeploymentIds, setSelectedDeploymentIds] = useState<number[]>([])
+  const [deploymentPage, setDeploymentPage] = useState<number>(1)
+  const [deploymentPageSize, setDeploymentPageSize] = useState<number>(25)
+  const [deploymentSearch, setDeploymentSearch] = useState<string>('')
+  const [deploymentFilter, setDeploymentFilter] = useState<'all' | 'active' | 'with_count'>('all')
 
   const filteredJobRoles = useMemo(() => {
     if (!roleSearchQuery.trim()) return jobRoles
@@ -812,6 +835,8 @@ export function SiteSurveyWorkspacePage() {
   async function saveDeploymentField(rowId: number, payload: Partial<SiteSurveyShiftDeployment>) {
     const key = `dep-${rowId}`
     setSaving(key, true)
+    // Instant optimistic update for 0ms visual delay
+    setShiftDeployments((prev) => prev.map((r) => (r.id === rowId ? { ...r, ...payload } : r)))
     try {
       const updated = await updateSiteSurveyShiftDeployment(rowId, payload)
       setShiftDeployments((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
@@ -959,63 +984,111 @@ export function SiteSurveyWorkspacePage() {
       })
       setShiftDeployments((prev) => [...prev, created])
       setAddDeploymentOpen(false)
-      setSelectedJobRoleId('')
+      setSelectedJobRoleIds([])
       setRoleSearchQuery('')
     } catch (e: unknown) {
       setActionError(parseApiError(e, 'Failed to add role').message)
     }
   }
 
-  async function handleImportAllMappedRoles() {
-    if (roleMappings.length === 0) {
-      setActionError('No active survey role mappings found in Masters.')
+  async function handleAddSelectedRoles() {
+    if (selectedJobRoleIds.length === 0) return
+    const first = selectedJobRoleIds[0]
+    if (selectedJobRoleIds.length === 1 && first !== undefined) {
+      await handleAddDeploymentRole(first)
       return
     }
     setImportingMappedRoles(true)
     setActionError(null)
     try {
-      const existingRoleIds = new Set(
-        shiftDeployments.map((d) => d.job_role).filter(Boolean)
-      )
-      const existingDescriptions = new Set(
-        shiftDeployments.map((d) => d.description?.trim().toLowerCase()).filter(Boolean)
-      )
-
-      const toAdd = roleMappings.filter((m) => {
-        const descMatch = existingDescriptions.has(m.description_text.trim().toLowerCase())
-        const roleMatch = m.job_role ? existingRoleIds.has(m.job_role) : false
-        return !descMatch && !roleMatch
+      const res = await importAllSurveyMappedRoles({
+        survey: surveyId,
+        job_role_ids: selectedJobRoleIds,
+        general_count: bulkGeneral,
+        first_shift_count: bulkShift1,
+        second_shift_count: bulkShift2,
+        night_shift_count: bulkNight,
+        remarks: bulkRemarks.trim() || undefined,
       })
-
-      if (toAdd.length === 0) {
-        setActionError('All active mapped roles are already in this survey table.')
-        setImportingMappedRoles(false)
-        return
+      if (res.items && Array.isArray(res.items)) {
+        setShiftDeployments([...res.items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)))
       }
+      setRoleRequirementsStale(true)
+      setAddDeploymentOpen(false)
+      setSelectedJobRoleIds([])
+      setRoleSearchQuery('')
+      setBulkRangeFeedback(
+        res.added_count > 0
+          ? `Added ${res.added_count} roles to survey.`
+          : `Selected roles are already in this survey.`
+      )
+      setTimeout(() => setBulkRangeFeedback(null), 5000)
+    } catch (e: unknown) {
+      setActionError(parseApiError(e, 'Failed to add roles').message)
+    } finally {
+      setImportingMappedRoles(false)
+    }
+  }
 
-      const createdList: SiteSurveyShiftDeployment[] = []
-      let sortOrder = shiftDeployments.length + 1
-      for (const m of toAdd) {
-        const created = await createSiteSurveyShiftDeployment({
-          survey: surveyId,
-          job_role: m.job_role,
-          description: m.description_text,
-          general_count: 0,
-          first_shift_count: 0,
-          second_shift_count: 0,
-          night_shift_count: 0,
-          line_type: 'item',
-          is_applicable: true,
-          sort_order: sortOrder++,
-        })
-        createdList.push(created)
+  async function handleImportAllMappedRoles() {
+    setImportingMappedRoles(true)
+    setActionError(null)
+    try {
+      const res = await importAllSurveyMappedRoles({
+        survey: surveyId,
+        general_count: bulkGeneral,
+        first_shift_count: bulkShift1,
+        second_shift_count: bulkShift2,
+        night_shift_count: bulkNight,
+        remarks: bulkRemarks.trim() || undefined,
+      })
+      if (res.items && Array.isArray(res.items)) {
+        setShiftDeployments([...res.items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)))
       }
-
-      setShiftDeployments((prev) => [...prev, ...createdList])
+      setRoleRequirementsStale(true)
+      setBulkRangeFeedback(
+        res.added_count > 0
+          ? `Imported ${res.added_count} mapped roles. Survey now has ${res.total_count} roles.`
+          : `All active mapped roles are already in this survey (${res.total_count} total).`
+      )
+      setTimeout(() => setBulkRangeFeedback(null), 5000)
     } catch (e: unknown) {
       setActionError(parseApiError(e, 'Failed to import mapped roles').message)
     } finally {
       setImportingMappedRoles(false)
+    }
+  }
+
+  async function handleDeploymentsQuickAction(
+    action: 'turn_off_unused' | 'turn_all_off' | 'turn_all_on' | 'remove_unused' | 'turn_selected_on' | 'turn_selected_off',
+    targetIds?: number[],
+  ) {
+    if (!surveyId) return
+    setQuickActionBusy(action)
+    setActionError(null)
+    try {
+      const res = await executeSurveyDeploymentsQuickAction({ survey: surveyId, action, deployment_ids: targetIds })
+      if (res.items && Array.isArray(res.items)) {
+        setShiftDeployments([...res.items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)))
+      }
+      setRoleRequirementsStale(true)
+      setBulkRangeFeedback(res.message)
+      setTimeout(() => setBulkRangeFeedback(null), 4000)
+    } catch (err: unknown) {
+      setActionError(parseApiError(err, 'Quick action failed').message)
+    } finally {
+      setQuickActionBusy(null)
+    }
+  }
+
+  async function handleDeleteDeployment(rowId: number, label: string) {
+    if (!window.confirm(`Remove "${label}" from this survey?`)) return
+    try {
+      await deleteSiteSurveyShiftDeployment(rowId)
+      setShiftDeployments((prev) => prev.filter((r) => r.id !== rowId))
+      setRoleRequirementsStale(true)
+    } catch (err: unknown) {
+      alert(parseApiError(err, 'Failed to delete row').message)
     }
   }
 
@@ -1078,6 +1151,41 @@ export function SiteSurveyWorkspacePage() {
   const deploymentFilledCount = applicableDeployments.filter((r) => r.total_count != null && r.total_count > 0).length
   const deploymentPercent = applicableDeployments.length > 0 ? (deploymentFilledCount / applicableDeployments.length) * 100 : 100
 
+  const filteredDeployments = useMemo(() => {
+    let list = shiftDeployments
+    if (deploymentFilter === 'active') {
+      list = list.filter((r) => r.is_applicable !== false || r.line_type !== 'item')
+    } else if (deploymentFilter === 'with_count') {
+      list = list.filter((r) => (r.total_count != null && r.total_count > 0) || r.line_type !== 'item')
+    }
+
+    if (deploymentSearch.trim()) {
+      const q = deploymentSearch.trim().toLowerCase()
+      list = list.filter((r) => {
+        if (r.line_type !== 'item') return false
+        return (
+          (r.job_role_name && r.job_role_name.toLowerCase().includes(q)) ||
+          (r.description && r.description.toLowerCase().includes(q)) ||
+          (r.job_role_code && r.job_role_code.toLowerCase().includes(q)) ||
+          (r.shift_label && r.shift_label.toLowerCase().includes(q))
+        )
+      })
+    }
+    return list
+  }, [shiftDeployments, deploymentFilter, deploymentSearch])
+
+  const totalDeploymentPages = Math.max(1, Math.ceil(filteredDeployments.length / deploymentPageSize))
+  const safeDeploymentPage = Math.min(Math.max(1, deploymentPage), totalDeploymentPages)
+
+  const paginatedDeployments = useMemo(() => {
+    const start = (safeDeploymentPage - 1) * deploymentPageSize
+    return filteredDeployments.slice(start, start + deploymentPageSize)
+  }, [filteredDeployments, safeDeploymentPage, deploymentPageSize])
+
+  const paginatedItemRows = useMemo(() => {
+    return paginatedDeployments.filter((r) => r.line_type === 'item')
+  }, [paginatedDeployments])
+
   const applicableLocations = locationLines.filter((r) => r.is_applicable !== false && r.row_type !== 'total' && r.row_type !== 'subtotal')
   const locationFilledCount = applicableLocations.filter((r) => r.proposed_count != null).length
   const locationPercent = applicableLocations.length > 0 ? (locationFilledCount / applicableLocations.length) * 100 : 100
@@ -1096,6 +1204,50 @@ export function SiteSurveyWorkspacePage() {
   const mappedDeployments = mappableDeployments.filter((r) => findMappingForRow(r.description) !== null)
   const missingMappings = mappableDeployments.filter((r) => findMappingForRow(r.description) === null)
   const ignoredDeployments = applicableDeployments.filter((r) => isRoleMappingIgnored(r.description))
+
+  async function handleApplyBulkRange() {
+    const targetIds = selectedDeploymentIds.length > 0
+      ? selectedDeploymentIds
+      : applicableDeployments.map((r) => r.id)
+
+    if (targetIds.length === 0) {
+      setActionError('No active roles found in this survey to apply headcount range.')
+      return
+    }
+    setApplyingBulkRange(true)
+    setActionError(null)
+    setBulkRangeFeedback(null)
+    try {
+      const res = await bulkApplySurveyDeploymentRange({
+        survey: surveyId,
+        general_count: bulkGeneral,
+        first_shift_count: bulkShift1,
+        second_shift_count: bulkShift2,
+        night_shift_count: bulkNight,
+        remarks: bulkRemarks.trim() || undefined,
+        target_mode: 'all',
+        deployment_ids: targetIds,
+      })
+
+      const updatedMap = new Map<number, SiteSurveyShiftDeployment>(
+        res.items.map((item) => [item.id, item])
+      )
+      setShiftDeployments((prev) =>
+        prev.map((r) => updatedMap.get(r.id) ?? r)
+      )
+      for (const item of res.items) {
+        setSaving(`dep-${item.id}`, false, null, true)
+      }
+      setRoleRequirementsStale(true)
+      const count = res.count ?? targetIds.length
+      setBulkRangeFeedback(`Applied headcount range to ${count} ${count === 1 ? 'role' : 'roles'}.`)
+      setTimeout(() => setBulkRangeFeedback(null), 4000)
+    } catch (e: unknown) {
+      setActionError(parseApiError(e, 'Failed to apply range').message)
+    } finally {
+      setApplyingBulkRange(false)
+    }
+  }
 
   // ─── Completion Readiness ────────────────────────────────────────────────────
 
@@ -1211,189 +1363,649 @@ export function SiteSurveyWorkspacePage() {
   const deploymentTab = (
     <div className="space-y-3">
       <SectionCard title="Manpower Deployment" description="Enter headcount for each role by shift">
-        {shiftDeployments.length === 0 ? (
-          <p className="text-sm text-app-secondary py-6 text-center">No deployment rows configured.</p>
-        ) : (
-          <div className="overflow-x-auto -mx-4">
-            <table className="w-full min-w-[900px]">
-              <thead>
-                <tr className="border-b border-app-border bg-app-muted/30">
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-16"></th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider">Role / Description</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">General</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 1</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 2</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Night</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Total</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-32">Remarks</th>
-                  <th className="px-3 py-2 w-14"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-app-border">
-                {shiftDeployments.map((row) => {
-                  const key = `dep-${row.id}`
-                  const isHeader = row.line_type === 'header'
-                  const isAgg = row.line_type === 'total' || row.line_type === 'subtotal'
-                  const applicable = row.is_applicable !== false
-                  const editable = canUpdate && !isHeader && !isAgg
+        {/* Headcount Range Toolbar (Minimal Logicon Style) */}
+        {canUpdate && (
+          <div className="mb-3 rounded-lg border border-app-border bg-app-surface p-2.5 text-xs shadow-2xs">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-app-heading">Apply Headcount:</span>
 
-                  if (isHeader) {
+                <div className="flex items-center gap-1 rounded border border-app-border bg-app-surface px-2 py-0.5">
+                  <span className="text-[11px] text-app-subtle font-medium">Gen:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={bulkGeneral || ''}
+                    placeholder="0"
+                    onChange={(e) => setBulkGeneral(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-10 text-center font-semibold text-app-text focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 rounded border border-app-border bg-app-surface px-2 py-0.5">
+                  <span className="text-[11px] text-app-subtle font-medium">Shift 1:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={bulkShift1 || ''}
+                    placeholder="0"
+                    onChange={(e) => setBulkShift1(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-10 text-center font-semibold text-app-text focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 rounded border border-app-border bg-app-surface px-2 py-0.5">
+                  <span className="text-[11px] text-app-subtle font-medium">Shift 2:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={bulkShift2 || ''}
+                    placeholder="0"
+                    onChange={(e) => setBulkShift2(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-10 text-center font-semibold text-app-text focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 rounded border border-app-border bg-app-surface px-2 py-0.5">
+                  <span className="text-[11px] text-app-subtle font-medium">Night:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={bulkNight || ''}
+                    placeholder="0"
+                    onChange={(e) => setBulkNight(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-10 text-center font-semibold text-app-text focus:outline-none"
+                  />
+                </div>
+
+                <input
+                  type="text"
+                  value={bulkRemarks}
+                  placeholder="Optional remarks..."
+                  onChange={(e) => setBulkRemarks(e.target.value)}
+                  className="w-32 rounded border border-app-border bg-app-surface px-2 py-0.5 text-xs text-app-text placeholder:text-app-subtle focus:outline-none"
+                />
+
+                <span className="text-app-subtle font-medium ml-1">
+                  Total: <strong className="text-app-heading">{bulkGeneral + bulkShift1 + bulkShift2 + bulkNight}</strong>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void handleApplyBulkRange()}
+                  disabled={applyingBulkRange || applicableDeployments.length === 0}
+                  className="min-h-7 text-xs px-3 font-medium cursor-pointer"
+                >
+                  {applyingBulkRange ? <Spinner className="h-3 w-3" /> : null}
+                  {selectedDeploymentIds.length > 0
+                    ? `Apply to selected (${selectedDeploymentIds.length})`
+                    : `Apply to all active (${applicableDeployments.length})`}
+                </Button>
+                {selectedDeploymentIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDeploymentIds([])}
+                    className="text-xs text-app-subtle hover:text-app-text cursor-pointer underline"
+                  >
+                    Clear selection
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {bulkRangeFeedback && (
+              <p className="mt-2 text-xs text-status-success font-medium">
+                ✓ {bulkRangeFeedback}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Search, Filter Pills & Quick Actions Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 py-2 px-0.5 text-xs border-b border-app-border/60">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search Input */}
+            <div className="relative flex items-center">
+              <Search className="absolute left-2.5 h-3.5 w-3.5 text-app-subtle pointer-events-none" />
+              <input
+                type="text"
+                value={deploymentSearch}
+                onChange={(e) => {
+                  setDeploymentSearch(e.target.value)
+                  setDeploymentPage(1)
+                }}
+                placeholder="Search role by name or code..."
+                className="w-48 sm:w-60 rounded-md border border-app-border bg-app-surface pl-8 pr-6 py-1 text-xs text-app-text placeholder:text-app-subtle focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+              {deploymentSearch && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeploymentSearch('')
+                    setDeploymentPage(1)
+                  }}
+                  className="absolute right-2 text-app-subtle hover:text-app-text text-xs cursor-pointer font-bold"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* Filter pills: All, Active, With Headcount */}
+            <div className="flex items-center rounded-md border border-app-border bg-app-surface p-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => { setDeploymentFilter('all'); setDeploymentPage(1) }}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  deploymentFilter === 'all'
+                    ? 'bg-brand-600 text-white shadow-2xs'
+                    : 'text-app-secondary hover:text-app-text'
+                }`}
+              >
+                All ({shiftDeployments.filter((r) => r.line_type === 'item').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDeploymentFilter('active'); setDeploymentPage(1) }}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  deploymentFilter === 'active'
+                    ? 'bg-brand-600 text-white shadow-2xs'
+                    : 'text-app-secondary hover:text-app-text'
+                }`}
+              >
+                Active ({shiftDeployments.filter((r) => r.line_type === 'item' && r.is_applicable !== false).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDeploymentFilter('with_count'); setDeploymentPage(1) }}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  deploymentFilter === 'with_count'
+                    ? 'bg-brand-600 text-white shadow-2xs'
+                    : 'text-app-secondary hover:text-app-text'
+                }`}
+              >
+                With Count ({shiftDeployments.filter((r) => r.line_type === 'item' && r.total_count != null && r.total_count > 0).length})
+              </button>
+            </div>
+          </div>
+
+          {canUpdate && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                disabled={Boolean(quickActionBusy)}
+                onClick={() => void handleDeploymentsQuickAction('turn_off_unused')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-app-border bg-app-surface text-app-secondary hover:text-app-text hover:bg-app-muted/50 transition-colors font-medium text-xs disabled:opacity-50 cursor-pointer shadow-2xs"
+                title="Turn off toggle for all roles where headcount is 0 in 1 click"
+              >
+                {quickActionBusy === 'turn_off_unused' ? (
+                  <Spinner className="h-3 w-3" />
+                ) : (
+                  <ToggleLeft className="h-3.5 w-3.5 text-app-subtle" />
+                )}
+                Turn off unassigned (0 count)
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(quickActionBusy)}
+                onClick={() => void handleDeploymentsQuickAction('turn_all_off')}
+                className="px-2.5 py-1 rounded-md text-app-subtle hover:text-app-text hover:bg-app-muted/40 transition-colors text-xs font-medium cursor-pointer"
+                title="Turn off all roles so you can easily enter count only for the 2-3 you need"
+              >
+                {quickActionBusy === 'turn_all_off' ? <Spinner className="h-3 w-3" /> : 'Turn all off'}
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(quickActionBusy)}
+                onClick={() => void handleDeploymentsQuickAction('turn_all_on')}
+                className="px-2.5 py-1 rounded-md text-app-subtle hover:text-app-text hover:bg-app-muted/40 transition-colors text-xs font-medium cursor-pointer"
+                title="Turn on all roles"
+              >
+                {quickActionBusy === 'turn_all_on' ? <Spinner className="h-3 w-3" /> : 'Turn all on'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Multi-page selection info banner */}
+        {selectedDeploymentIds.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs bg-brand-50/60 dark:bg-brand-950/40 px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300">
+            <span className="font-semibold">{selectedDeploymentIds.length} roles selected:</span>
+            {canUpdate && (
+              <>
+                <button
+                  type="button"
+                  disabled={Boolean(quickActionBusy)}
+                  onClick={() => void handleDeploymentsQuickAction('turn_selected_on', selectedDeploymentIds)}
+                  className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-[11px] cursor-pointer shadow-2xs"
+                  title="Turn on green active toggle for all selected roles in 1 click"
+                >
+                  {quickActionBusy === 'turn_selected_on' ? <Spinner className="h-3 w-3" /> : 'Turn ON selected'}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(quickActionBusy)}
+                  onClick={() => void handleDeploymentsQuickAction('turn_selected_off', selectedDeploymentIds)}
+                  className="px-2 py-0.5 rounded bg-app-surface border border-app-border text-app-secondary hover:text-app-text font-medium text-[11px] cursor-pointer shadow-2xs"
+                  title="Turn off toggle for all selected roles in 1 click"
+                >
+                  {quickActionBusy === 'turn_selected_off' ? <Spinner className="h-3 w-3" /> : 'Turn OFF selected'}
+                </button>
+              </>
+            )}
+            {selectedDeploymentIds.length < filteredDeployments.filter((r) => r.line_type === 'item').length && (
+              <button
+                type="button"
+                onClick={() => setSelectedDeploymentIds(filteredDeployments.filter((r) => r.line_type === 'item').map((r) => r.id))}
+                className="font-semibold underline hover:text-brand-800 dark:hover:text-brand-200 cursor-pointer ml-1"
+              >
+                Select all {filteredDeployments.filter((r) => r.line_type === 'item').length} filtered roles
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedDeploymentIds([])}
+              className="text-app-subtle hover:text-app-text ml-auto cursor-pointer underline text-[11px]"
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
+
+        {filteredDeployments.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-sm text-app-secondary">
+              {shiftDeployments.length === 0
+                ? 'No deployment rows configured.'
+                : 'No deployment roles match the active filter or search query.'}
+            </p>
+            {(deploymentSearch || deploymentFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeploymentSearch('')
+                  setDeploymentFilter('all')
+                  setDeploymentPage(1)
+                }}
+                className="mt-2 text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold cursor-pointer"
+              >
+                Reset filters and show all {shiftDeployments.length} roles
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="overflow-x-auto -mx-4">
+              <table className="w-full min-w-[900px]">
+                <thead>
+                  <tr className="border-b border-app-border bg-app-muted/30">
+                    <th className="px-3 py-2 text-left w-8">
+                      <input
+                        type="checkbox"
+                        checked={paginatedItemRows.length > 0 && paginatedItemRows.every((r) => selectedDeploymentIds.includes(r.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedDeploymentIds(Array.from(new Set([...selectedDeploymentIds, ...paginatedItemRows.map((r) => r.id)])))
+                          } else {
+                            const pageIds = new Set(paginatedItemRows.map((r) => r.id))
+                            setSelectedDeploymentIds(selectedDeploymentIds.filter((id) => !pageIds.has(id)))
+                          }
+                        }}
+                        className="rounded border-app-border text-brand-600 focus:ring-brand-500 h-3.5 w-3.5 cursor-pointer"
+                        title="Select/deselect all on this page"
+                      />
+                    </th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-12">Active</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider">Role / Description</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">General</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 1</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 2</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Night</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Total</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-32">Remarks</th>
+                    <th className="px-3 py-2 w-16"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-app-border">
+                  {paginatedDeployments.map((row) => {
+                    const key = `dep-${row.id}`
+                    const isHeader = row.line_type === 'header'
+                    const isAgg = row.line_type === 'total' || row.line_type === 'subtotal'
+                    const applicable = row.is_applicable !== false
+                    const editable = canUpdate && !isHeader && !isAgg
+
+                    if (isHeader) {
+                      return (
+                        <tr key={row.id} className="bg-brand-50/50">
+                          <td colSpan={10} className="px-3 py-2">
+                            <span className="text-sm font-semibold text-brand-700">{row.description}</span>
+                          </td>
+                        </tr>
+                      )
+                    }
+
+                    if (isAgg) {
+                      return (
+                        <tr key={row.id} className="bg-app-muted/50 font-medium">
+                          <td className="px-3 py-2"></td>
+                          <td className="px-2 py-2"></td>
+                          <td className="px-3 py-2 text-sm text-app-text">{row.description}</td>
+                          <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.general_count)}</td>
+                          <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.first_shift_count)}</td>
+                          <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.second_shift_count)}</td>
+                          <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.night_shift_count)}</td>
+                          <td className="px-3 py-2 text-center text-sm font-semibold">{formatHeadcount(row.total_count)}</td>
+                          <td className="px-3 py-2"></td>
+                          <td className="px-3 py-2"></td>
+                        </tr>
+                      )
+                    }
+
+                    // Determine mapping/role status for this row
+                    const hasLinkedRole = Boolean(row.job_role)
+                    const isIgnored = isRoleMappingIgnored(row.description)
+                    const mapping = !hasLinkedRole && !isIgnored ? findMappingForRow(row.description) : null
+                    const isSelected = selectedDeploymentIds.includes(row.id)
+
                     return (
-                      <tr key={row.id} className="bg-brand-50/50">
-                        <td colSpan={9} className="px-3 py-2">
-                          <span className="text-sm font-semibold text-brand-700">{row.description}</span>
+                      <tr key={row.id} className={`${!applicable ? 'bg-app-muted/20 opacity-75' : isSelected ? 'bg-brand-50/30 dark:bg-brand-950/20' : 'hover:bg-app-muted/20'} transition-colors`}>
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedDeploymentIds((prev) => [...prev, row.id])
+                              } else {
+                                setSelectedDeploymentIds((prev) => prev.filter((id) => id !== row.id))
+                              }
+                            }}
+                            className="rounded border-app-border text-brand-600 focus:ring-brand-500 h-3.5 w-3.5 cursor-pointer"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          {editable ? (
+                            <ApplicableToggle
+                              value={applicable}
+                              onChange={(v) => {
+                                setShiftDeployments((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, is_applicable: v, not_applicable_reason: v ? '' : r.not_applicable_reason ?? '' }
+                                      : r
+                                  )
+                                )
+                                void saveDeploymentField(row.id, {
+                                  is_applicable: v,
+                                  not_applicable_reason: v ? '' : row.not_applicable_reason ?? '',
+                                })
+                              }}
+                            />
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div>
+                            <p className="text-sm text-app-text">{row.job_role_name ?? row.description ?? '—'}</p>
+                            {row.job_role_code && <p className="text-xs text-app-subtle">{row.job_role_code}</p>}
+                            {row.shift_label ? <p className="text-xs text-app-subtle">{row.shift_label}</p> : null}
+                            {!applicable && row.not_applicable_reason ? (
+                              <p className="text-xs text-app-subtle italic mt-0.5">{row.not_applicable_reason}</p>
+                            ) : null}
+                            {/* Role/Mapping status badge */}
+                            {applicable && (
+                              <div className="mt-1">
+                                {hasLinkedRole ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-status-success">
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    Role linked
+                                  </span>
+                                ) : isIgnored ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-app-subtle">
+                                    <Info className="h-3 w-3" />
+                                    Template row
+                                  </span>
+                                ) : mapping ? (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] text-status-success"
+                                    title={getMappingTooltip(mapping)}
+                                  >
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    Mapped
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-status-warning">
+                                    <AlertCircle className="h-3 w-3" />
+                                    Mapping needed
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          {editable ? (
+                            <NumberInput
+                              value={row.general_count}
+                              onChange={(v) => {
+                                setShiftDeployments((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? {
+                                          ...r,
+                                          general_count: v,
+                                          ...(v != null && v > 0 && !r.is_applicable ? { is_applicable: true, not_applicable_reason: '' } : {}),
+                                        }
+                                      : r
+                                  )
+                                )
+                              }}
+                              onBlur={(v) => {
+                                const updates: Record<string, any> = { general_count: v }
+                                if (v != null && v > 0 && !row.is_applicable) {
+                                  updates.is_applicable = true
+                                  updates.not_applicable_reason = ''
+                                }
+                                void saveDeploymentField(row.id, updates)
+                              }}
+                            />
+                          ) : (
+                            <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.general_count)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {editable ? (
+                            <NumberInput
+                              value={row.first_shift_count}
+                              onChange={(v) => {
+                                setShiftDeployments((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? {
+                                          ...r,
+                                          first_shift_count: v,
+                                          ...(v != null && v > 0 && !r.is_applicable ? { is_applicable: true, not_applicable_reason: '' } : {}),
+                                        }
+                                      : r
+                                  )
+                                )
+                              }}
+                              onBlur={(v) => {
+                                const updates: Record<string, any> = { first_shift_count: v }
+                                if (v != null && v > 0 && !row.is_applicable) {
+                                  updates.is_applicable = true
+                                  updates.not_applicable_reason = ''
+                                }
+                                void saveDeploymentField(row.id, updates)
+                              }}
+                            />
+                          ) : (
+                            <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.first_shift_count)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {editable ? (
+                            <NumberInput
+                              value={row.second_shift_count}
+                              onChange={(v) => {
+                                setShiftDeployments((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? {
+                                          ...r,
+                                          second_shift_count: v,
+                                          ...(v != null && v > 0 && !r.is_applicable ? { is_applicable: true, not_applicable_reason: '' } : {}),
+                                        }
+                                      : r
+                                  )
+                                )
+                              }}
+                              onBlur={(v) => {
+                                const updates: Record<string, any> = { second_shift_count: v }
+                                if (v != null && v > 0 && !row.is_applicable) {
+                                  updates.is_applicable = true
+                                  updates.not_applicable_reason = ''
+                                }
+                                void saveDeploymentField(row.id, updates)
+                              }}
+                            />
+                          ) : (
+                            <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.second_shift_count)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {editable ? (
+                            <NumberInput
+                              value={row.night_shift_count}
+                              onChange={(v) => {
+                                setShiftDeployments((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? {
+                                          ...r,
+                                          night_shift_count: v,
+                                          ...(v != null && v > 0 && !r.is_applicable ? { is_applicable: true, not_applicable_reason: '' } : {}),
+                                        }
+                                      : r
+                                  )
+                                )
+                              }}
+                              onBlur={(v) => {
+                                const updates: Record<string, any> = { night_shift_count: v }
+                                if (v != null && v > 0 && !row.is_applicable) {
+                                  updates.is_applicable = true
+                                  updates.not_applicable_reason = ''
+                                }
+                                void saveDeploymentField(row.id, updates)
+                              }}
+                            />
+                          ) : (
+                            <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.night_shift_count)}</span>
+                          )}
+                        </td>
+                        {/* Total - display only, calculated by backend */}
+                        <td className="px-3 py-2">
+                          <span className="block text-center text-sm font-medium text-app-text">{formatHeadcount(row.total_count)}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {editable ? (
+                            <input
+                              type="text"
+                              value={row.remarks ?? ''}
+                              onChange={(e) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, remarks: e.target.value } : r))}
+                              onBlur={(e) => void saveDeploymentField(row.id, { remarks: e.target.value || undefined })}
+                              placeholder="Notes..."
+                              className="w-full rounded-lg border border-app-border bg-app-surface px-2 py-1 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+                            />
+                          ) : (
+                            <span className="text-xs text-app-secondary">{row.remarks ?? '—'}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <SaveIndicator state={saveStates[key]} />
+                            {editable && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteDeployment(row.id, row.job_role_name ?? row.description ?? 'this role')}
+                                className="p-1 rounded text-app-subtle hover:text-status-error hover:bg-status-error/10 transition-colors cursor-pointer"
+                                title="Remove role from survey"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
-                  }
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-                  if (isAgg) {
-                    return (
-                      <tr key={row.id} className="bg-app-muted/50 font-medium">
-                        <td className="px-3 py-2"></td>
-                        <td className="px-3 py-2 text-sm text-app-text">{row.description}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.general_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.first_shift_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.second_shift_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.night_shift_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm font-semibold">{formatHeadcount(row.total_count)}</td>
-                        <td className="px-3 py-2"></td>
-                        <td className="px-3 py-2"></td>
-                      </tr>
-                    )
-                  }
+            {/* Pagination Controls */}
+            {filteredDeployments.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 px-1 text-xs text-app-secondary border-t border-app-border">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Showing{' '}
+                    <strong className="text-app-heading">
+                      {(safeDeploymentPage - 1) * deploymentPageSize + 1}
+                    </strong>
+                    –
+                    <strong className="text-app-heading">
+                      {Math.min(safeDeploymentPage * deploymentPageSize, filteredDeployments.length)}
+                    </strong>{' '}
+                    of <strong className="text-app-heading">{filteredDeployments.length}</strong> roles
+                    {(deploymentSearch || deploymentFilter !== 'all') && ' (filtered)'}
+                  </span>
+                </div>
 
-                  // Determine mapping/role status for this row
-                  const hasLinkedRole = Boolean(row.job_role)
-                  const isIgnored = isRoleMappingIgnored(row.description)
-                  const mapping = !hasLinkedRole && !isIgnored ? findMappingForRow(row.description) : null
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-app-subtle">Per page:</span>
+                    <select
+                      value={deploymentPageSize}
+                      onChange={(e) => {
+                        setDeploymentPageSize(Number(e.target.value))
+                        setDeploymentPage(1)
+                      }}
+                      className="rounded border border-app-border bg-app-surface px-2 py-1 text-xs text-app-text focus:outline-none cursor-pointer"
+                    >
+                      <option value={10}>10</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                  </div>
 
-                  return (
-                    <tr key={row.id} className={`${!applicable ? 'bg-app-muted/30 opacity-60' : 'hover:bg-app-muted/20'} transition-colors`}>
-                      <td className="px-3 py-2">
-                        {editable ? (
-                          <ApplicableToggle
-                            value={applicable}
-                            onChange={(v) => void saveDeploymentField(row.id, {
-                              is_applicable: v,
-                              not_applicable_reason: v ? '' : row.not_applicable_reason ?? '',
-                            })}
-                          />
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div>
-                          <p className="text-sm text-app-text">{row.job_role_name ?? row.description ?? '—'}</p>
-                          {row.job_role_code && <p className="text-xs text-app-subtle">{row.job_role_code}</p>}
-                          {row.shift_label ? <p className="text-xs text-app-subtle">{row.shift_label}</p> : null}
-                          {!applicable && row.not_applicable_reason ? (
-                            <p className="text-xs text-app-subtle italic mt-0.5">{row.not_applicable_reason}</p>
-                          ) : null}
-                          {/* Role/Mapping status badge */}
-                          {applicable && (
-                            <div className="mt-1">
-                              {hasLinkedRole ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-status-success">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Role linked
-                                </span>
-                              ) : isIgnored ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-app-subtle">
-                                  <Info className="h-3 w-3" />
-                                  Template row
-                                </span>
-                              ) : mapping ? (
-                                <span
-                                  className="inline-flex items-center gap-1 text-[10px] text-status-success"
-                                  title={getMappingTooltip(mapping)}
-                                >
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Mapped
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-status-warning">
-                                  <AlertCircle className="h-3 w-3" />
-                                  Mapping needed
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        {editable && applicable ? (
-                          <NumberInput
-                            value={row.general_count}
-                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, general_count: v } : r))}
-                            onBlur={(v) => void saveDeploymentField(row.id, { general_count: v })}
-
-                          />
-                        ) : (
-                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.general_count)}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {editable && applicable ? (
-                          <NumberInput
-                            value={row.first_shift_count}
-                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, first_shift_count: v } : r))}
-                            onBlur={(v) => void saveDeploymentField(row.id, { first_shift_count: v })}
-
-                          />
-                        ) : (
-                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.first_shift_count)}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {editable && applicable ? (
-                          <NumberInput
-                            value={row.second_shift_count}
-                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, second_shift_count: v } : r))}
-                            onBlur={(v) => void saveDeploymentField(row.id, { second_shift_count: v })}
-
-                          />
-                        ) : (
-                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.second_shift_count)}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {editable && applicable ? (
-                          <NumberInput
-                            value={row.night_shift_count}
-                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, night_shift_count: v } : r))}
-                            onBlur={(v) => void saveDeploymentField(row.id, { night_shift_count: v })}
-
-                          />
-                        ) : (
-                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.night_shift_count)}</span>
-                        )}
-                      </td>
-                      {/* Total - display only, calculated by backend */}
-                      <td className="px-3 py-2">
-                        <span className="block text-center text-sm font-medium text-app-text">{formatHeadcount(row.total_count)}</span>
-                      </td>
-                      <td className="px-3 py-2">
-                        {editable && applicable ? (
-                          <input
-                            type="text"
-                            value={row.remarks ?? ''}
-                            onChange={(e) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, remarks: e.target.value } : r))}
-                            onBlur={(e) => void saveDeploymentField(row.id, { remarks: e.target.value || undefined })}
-                            placeholder="Notes..."
-                            className="w-full rounded-lg border border-app-border bg-app-surface px-2 py-1 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span className="text-xs text-app-secondary">{row.remarks ?? '—'}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <SaveIndicator state={saveStates[key]} />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={safeDeploymentPage <= 1}
+                      onClick={() => setDeploymentPage((p) => Math.max(1, p - 1))}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-app-border bg-app-surface text-app-text hover:bg-app-muted/50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium cursor-pointer"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                    </button>
+                    <span className="px-2 font-medium text-app-text">
+                      {safeDeploymentPage} / {totalDeploymentPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeDeploymentPage >= totalDeploymentPages}
+                      onClick={() => setDeploymentPage((p) => Math.min(totalDeploymentPages, p + 1))}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-app-border bg-app-surface text-app-text hover:bg-app-muted/50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium cursor-pointer"
+                    >
+                      Next <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
         {canUpdate ? (
@@ -1402,9 +2014,29 @@ export function SiteSurveyWorkspacePage() {
               <div className="w-full rounded-lg border border-app-border bg-app-muted/30 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-app-heading">Add Role to Deployment</p>
-                  <span className="text-xs text-app-subtle">
-                    {jobRolesLoading ? 'Loading 650+ roles...' : `${filteredJobRoles.length} roles available`}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-app-subtle">
+                      {jobRolesLoading ? 'Loading 650+ roles...' : `${selectedJobRoleIds.length} of ${filteredJobRoles.length} roles selected`}
+                    </span>
+                    {filteredJobRoles.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedJobRoleIds(filteredJobRoles.map((r) => r.id))}
+                        className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold cursor-pointer"
+                      >
+                        Select All ({filteredJobRoles.length})
+                      </button>
+                    )}
+                    {selectedJobRoleIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedJobRoleIds([])}
+                        className="text-xs text-app-subtle hover:text-app-text hover:underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
                 
                 {/* Instant Search for 659+ roles */}
@@ -1422,10 +2054,14 @@ export function SiteSurveyWorkspacePage() {
 
                 <div className="flex flex-col sm:flex-row gap-3">
                   <select
-                    value={selectedJobRoleId}
-                    onChange={(e) => setSelectedJobRoleId(e.target.value)}
+                    multiple
+                    value={selectedJobRoleIds.map(String)}
+                    onChange={(e) => {
+                      const selected = Array.from(e.target.selectedOptions, (opt) => Number(opt.value))
+                      setSelectedJobRoleIds(selected)
+                    }}
                     disabled={jobRolesLoading}
-                    size={Math.min(6, Math.max(3, filteredJobRoles.length))}
+                    size={Math.min(8, Math.max(4, filteredJobRoles.length))}
                     className="flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                   >
                     {filteredJobRoles.length === 0 ? (
@@ -1440,20 +2076,28 @@ export function SiteSurveyWorkspacePage() {
                   </select>
                   <div className="flex sm:flex-col justify-end gap-2">
                     <Button
-                      onClick={() => {
-                        const roleId = Number(selectedJobRoleId)
-                        if (roleId) void handleAddDeploymentRole(roleId)
-                      }}
-                      disabled={!selectedJobRoleId}
+                      onClick={() => void handleAddSelectedRoles()}
+                      disabled={selectedJobRoleIds.length === 0 || importingMappedRoles}
                       className="min-h-9 px-4 text-sm whitespace-nowrap"
                     >
-                      Add Role
+                      {importingMappedRoles ? <Spinner className="h-3.5 w-3.5" /> : null}
+                      {selectedJobRoleIds.length > 1 ? `Add ${selectedJobRoleIds.length} Roles` : 'Add Role'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void handleImportAllMappedRoles()}
+                      disabled={importingMappedRoles}
+                      className="min-h-9 px-3 text-xs whitespace-nowrap"
+                      title="Add all active mapped roles into deployment"
+                    >
+                      {importingMappedRoles ? <Spinner className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                      Add All Mapped Roles
                     </Button>
                     <Button
                       variant="secondary"
                       onClick={() => {
                         setAddDeploymentOpen(false)
-                        setSelectedJobRoleId('')
+                        setSelectedJobRoleIds([])
                         setRoleSearchQuery('')
                       }}
                       className="min-h-9 px-3 text-sm"
@@ -1466,18 +2110,16 @@ export function SiteSurveyWorkspacePage() {
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <AddRowButton onClick={() => setAddDeploymentOpen(true)} label="Add role" />
-                {roleMappings.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => void handleImportAllMappedRoles()}
-                    disabled={importingMappedRoles}
-                    className="min-h-9 text-xs flex items-center gap-1.5"
-                    title="Add all configured active role mappings into this survey"
-                  >
-                    {importingMappedRoles ? <Spinner className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                    {importingMappedRoles ? 'Adding Mapped Roles...' : 'Add All Mapped Roles'}
-                  </Button>
-                )}
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleImportAllMappedRoles()}
+                  disabled={importingMappedRoles}
+                  className="min-h-9 text-xs flex items-center gap-1.5"
+                  title="Add all configured active role mappings into this survey"
+                >
+                  {importingMappedRoles ? <Spinner className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                  {importingMappedRoles ? 'Adding Roles...' : 'Add All Mapped Roles'}
+                </Button>
               </div>
             )}
           </div>
