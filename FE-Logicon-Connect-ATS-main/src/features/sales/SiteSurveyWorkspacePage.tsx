@@ -1200,9 +1200,10 @@ export function SiteSurveyWorkspacePage() {
 
   // ─── Role Mapping Calculations ───────────────────────────────────────────────
 
+  const isRowMapped = (r: SiteSurveyShiftDeployment) => Boolean(r.job_role) || findMappingForRow(r.description) !== null
   const mappableDeployments = applicableDeployments.filter((r) => !isRoleMappingIgnored(r.description))
-  const mappedDeployments = mappableDeployments.filter((r) => findMappingForRow(r.description) !== null)
-  const missingMappings = mappableDeployments.filter((r) => findMappingForRow(r.description) === null)
+  const mappedDeployments = mappableDeployments.filter((r) => isRowMapped(r))
+  const missingMappings = mappableDeployments.filter((r) => !isRowMapped(r))
   const ignoredDeployments = applicableDeployments.filter((r) => isRoleMappingIgnored(r.description))
 
   async function handleApplyBulkRange() {
@@ -2569,14 +2570,21 @@ export function SiteSurveyWorkspacePage() {
             <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-status-warning mt-0.5 shrink-0" />
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium text-app-text">Missing role mappings</p>
-                  <ul className="space-y-0.5">
-                    {missingMappings.map((row) => (
-                      <li key={row.id} className="text-xs text-app-secondary">
+                <div className="space-y-1.5 flex-1 min-w-0">
+                  <p className="text-sm font-medium text-app-text">
+                    Missing role mappings ({missingMappings.length})
+                  </p>
+                  <ul className="max-h-52 overflow-y-auto space-y-0.5 divide-y divide-status-warning/10 pr-1">
+                    {missingMappings.slice(0, 100).map((row) => (
+                      <li key={row.id} className="text-xs text-app-secondary py-0.5">
                         No mapping configured for "{row.description}"
                       </li>
                     ))}
+                    {missingMappings.length > 100 && (
+                      <li className="text-xs font-semibold text-app-subtle pt-1">
+                        ...and {missingMappings.length - 100} more unmapped roles
+                      </li>
+                    )}
                   </ul>
                   <p className="text-xs text-app-subtle mt-2">
                     Some rows will fail until mappings are configured. Ask admin to configure survey role mappings.
@@ -2714,9 +2722,9 @@ export function SiteSurveyWorkspacePage() {
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-status-success mb-2">
                       Created ({generateResult.created.length})
                     </h4>
-                    <div className="rounded-lg border border-app-border overflow-hidden">
+                    <div className="rounded-lg border border-app-border overflow-hidden max-h-72 overflow-y-auto">
                       <table className="w-full text-sm">
-                        <thead className="bg-app-muted/50">
+                        <thead className="bg-app-muted/50 sticky top-0 z-10">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Role</th>
                             <th className="px-3 py-2 text-right text-xs font-medium text-app-secondary">Count</th>
@@ -2741,9 +2749,9 @@ export function SiteSurveyWorkspacePage() {
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-2">
                       Updated ({generateResult.updated?.length ?? 0})
                     </h4>
-                    <div className="rounded-lg border border-app-border overflow-hidden">
+                    <div className="rounded-lg border border-app-border overflow-hidden max-h-72 overflow-y-auto">
                       <table className="w-full text-sm">
-                        <thead className="bg-app-muted/50">
+                        <thead className="bg-app-muted/50 sticky top-0 z-10">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Role</th>
                             <th className="px-3 py-2 text-right text-xs font-medium text-app-secondary">Count</th>
@@ -2768,9 +2776,9 @@ export function SiteSurveyWorkspacePage() {
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-status-danger mb-2">
                       Failed ({generateResult.errors.length})
                     </h4>
-                    <div className="rounded-lg border border-status-danger/30 overflow-hidden">
+                    <div className="rounded-lg border border-status-danger/30 overflow-hidden max-h-72 overflow-y-auto">
                       <table className="w-full text-sm">
-                        <thead className="bg-status-danger/5">
+                        <thead className="bg-status-danger/5 sticky top-0 z-10">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-status-danger">Role</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-status-danger">Issue</th>
@@ -2795,9 +2803,9 @@ export function SiteSurveyWorkspacePage() {
                     <summary className="text-xs font-semibold uppercase tracking-wider text-app-subtle cursor-pointer hover:text-app-secondary mb-2">
                       Skipped ({generateResult.skipped.length}) — click to view
                     </summary>
-                    <div className="rounded-lg border border-app-border overflow-hidden mt-2">
+                    <div className="rounded-lg border border-app-border overflow-hidden mt-2 max-h-72 overflow-y-auto">
                       <table className="w-full text-sm">
-                        <thead className="bg-app-muted/50">
+                        <thead className="bg-app-muted/50 sticky top-0 z-10">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Role</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Reason</th>

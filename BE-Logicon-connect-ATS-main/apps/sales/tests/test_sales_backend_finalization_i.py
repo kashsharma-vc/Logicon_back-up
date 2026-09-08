@@ -659,6 +659,30 @@ class TestGenerateRoleRequirementsFromSurvey(TestCase):
         self.assertEqual(srr.wage_category_id, self.wage_category.pk)
         self.assertEqual(srr.manpower_count, 4)
 
+    def test_free_text_skill_category_resolves_wage_category_gracefully(self):
+        """Roles with unstandardized skill_category strings still resolve without error."""
+        custom_role = JobRole.objects.create(
+            org=self.org,
+            name='AWS Cloud Engineer',
+            code='aws_cloud_eng',
+            skill_category='AWS cloud computing or mechanical design engineer',
+            is_active=True,
+        )
+        SiteSurveyShiftDeployment.objects.create(
+            survey=self.survey,
+            job_role=custom_role,
+            description='AWS Cloud Engineer',
+            general_count=2,
+            line_type='item',
+            sort_order=20,
+        )
+        result = generate_role_requirements_from_survey(self.survey, self.user)
+        created_descs = [c['description'] for c in result['created']]
+        self.assertIn('AWS Cloud Engineer', created_descs)
+        srr = SalesRoleRequirement.objects.get(survey=self.survey, job_role=custom_role)
+        self.assertIsNotNone(srr.wage_category)
+        self.assertEqual(srr.manpower_count, 2)
+
     def test_generated_srrs_link_to_lead_site_survey(self):
         generate_role_requirements_from_survey(self.survey, self.user)
         srr = SalesRoleRequirement.objects.get(

@@ -1623,14 +1623,48 @@ def _resolve_survey_role_defaults(org, row):
     Resolve proposal-ready role defaults for a survey deployment row.
 
     Structured rows created from a JobRole do not need a description mapping.
-    They still require a configured WageCategory matching the role's
-    skill_category; otherwise generation fails with a clear reason.
+    They resolve a WageCategory matching the role's skill_category, or fall back
+    to an appropriate WageCategory based on role hints or system defaults,
+    ensuring free-text skill categories do not block survey completion.
     """
-    if row.job_role_id:
-        from types import SimpleNamespace
-        from apps.sales.models import SurveyRoleMapping
-        from apps.wages.models import WageCategory
+    from types import SimpleNamespace
+    from apps.sales.models import SurveyRoleMapping
+    from apps.wages.models import WageCategory
 
+    def _resolve_fallback_wage_category(skill_cat, role_name, extra_desc=''):
+        cat_str = str(skill_cat or '').strip()
+        if cat_str:
+            wc = (
+                WageCategory.objects.filter(code__iexact=cat_str).first()
+                or WageCategory.objects.filter(name__iexact=cat_str).first()
+            )
+            if wc is not None:
+                return wc
+
+        hint_text = f"{cat_str} {role_name or ''} {extra_desc or ''}".lower()
+        if any(k in hint_text for k in ('supervisor', 'manager', 'lead', 'head', 'incharge', 'director')):
+            wc = WageCategory.objects.filter(code='supervisor').first()
+            if wc:
+                return wc
+        if any(k in hint_text for k in ('highly', 'engineer', 'developer', 'ca', 'analyst', 'specialist', 'designer', 'architect', 'expert')):
+            wc = WageCategory.objects.filter(code='highly_skilled').first()
+            if wc:
+                return wc
+        if any(k in hint_text for k in ('unskilled', 'helper', 'loader', 'cleaner', 'sweeper', 'peon', 'labour', 'attendant', 'boy')):
+            wc = WageCategory.objects.filter(code='unskilled').first()
+            if wc:
+                return wc
+        if 'semi' in hint_text:
+            wc = WageCategory.objects.filter(code='semi_skilled').first()
+            if wc:
+                return wc
+
+        return (
+            WageCategory.objects.filter(code='skilled').first()
+            or WageCategory.objects.first()
+        )
+
+    if row.job_role_id:
         job_role = row.job_role
         if job_role is None or (job_role.org_id is not None and job_role.org_id != org.id) or not job_role.is_active:
             return None, 'job_role_not_available'
@@ -1645,9 +1679,11 @@ def _resolve_survey_role_defaults(org, row):
         if mapping is not None:
             return mapping, None
 
-        wage_category = WageCategory.objects.filter(
-            code=job_role.skill_category,
-        ).first()
+        desc_mapping = _resolve_survey_role_mapping(org, row.description)
+        if desc_mapping is not None and desc_mapping.wage_category is not None:
+            return desc_mapping, None
+
+        wage_category = _resolve_fallback_wage_category(job_role.skill_category, job_role.name, row.description)
         if wage_category is None:
             return None, 'wage_category_not_found'
 
