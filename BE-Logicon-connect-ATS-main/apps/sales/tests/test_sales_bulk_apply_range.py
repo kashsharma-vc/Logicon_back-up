@@ -176,6 +176,43 @@ class TestBulkApplyRange(TestCase):
         )
         self.assertEqual(resp.status_code, http_status.HTTP_400_BAD_REQUEST)
 
+    def test_bulk_apply_range_explicit_deployment_ids(self):
+        row1 = SiteSurveyShiftDeployment.objects.create(
+            survey=self.survey_a,
+            description='Custom Role 1',
+            line_type='item',
+            is_applicable=True,
+            sort_order=1,
+        )
+        row2 = SiteSurveyShiftDeployment.objects.create(
+            survey=self.survey_a,
+            description='Custom Role 2',
+            line_type='item',
+            is_applicable=True,
+            sort_order=2,
+        )
+        resp = self.api.post(
+            '/api/sales/site-survey-shift-deployments/bulk-apply-range/',
+            data={
+                'survey': self.survey_a.pk,
+                'general_count': 2,
+                'first_shift_count': 1,
+                'second_shift_count': 0,
+                'night_shift_count': 1,
+                'remarks': 'Explicit IDs Test',
+                'target_mode': 'all',
+                'deployment_ids': [row1.pk],
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, http_status.HTTP_200_OK)
+        self.assertEqual(resp.data['count'], 1)
+        row1.refresh_from_db()
+        row2.refresh_from_db()
+        self.assertEqual(row1.total_count, Decimal('4.00'))
+        self.assertEqual(row1.remarks, 'Explicit IDs Test')
+        self.assertEqual(row2.total_count, Decimal('0.00'))
+
     def test_quick_actions_turn_off_unused(self):
         # row_elec has total_count=0, row_plumber has total_count=4 from setUp
         row_elec = SiteSurveyShiftDeployment.objects.create(

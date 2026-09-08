@@ -981,8 +981,22 @@ class SiteSurveyShiftDeploymentViewSet(_SurveyChildViewSetBase):
         else:
             target_qs = base_qs
 
+        target_ids = list(target_qs.values_list('id', flat=True))
+        if not target_ids:
+            return Response({
+                'count': 0,
+                'items': [],
+                'message': 'No eligible shift deployment rows found to update.',
+            })
+
+        from django.utils import timezone
+        now = timezone.now()
+
         with transaction.atomic():
-            target_rows = list(target_qs.select_for_update())
+            # Query the table directly without outer joins for PostgreSQL select_for_update compatibility
+            target_rows = list(
+                SiteSurveyShiftDeployment.objects.filter(id__in=target_ids).select_for_update()
+            )
             for row in target_rows:
                 row.general_count = general_count
                 row.first_shift_count = first_shift_count
@@ -990,6 +1004,7 @@ class SiteSurveyShiftDeploymentViewSet(_SurveyChildViewSetBase):
                 row.night_shift_count = night_shift_count
                 reliever = row.reliever_count or Decimal('0')
                 row.total_count = general_count + first_shift_count + second_shift_count + night_shift_count + reliever
+                row.updated_at = now
                 if remarks is not None and str(remarks).strip():
                     row.remarks = str(remarks).strip()
 
@@ -998,11 +1013,14 @@ class SiteSurveyShiftDeploymentViewSet(_SurveyChildViewSetBase):
                 fields_to_update.append('remarks')
             SiteSurveyShiftDeployment.objects.bulk_update(target_rows, fields_to_update)
 
-        serializer = SiteSurveyShiftDeploymentSerializer(target_rows, many=True, context=self.get_serializer_context())
+        refreshed_rows = list(
+            self.filter_queryset(self.get_queryset()).filter(id__in=target_ids)
+        )
+        serializer = SiteSurveyShiftDeploymentSerializer(refreshed_rows, many=True, context=self.get_serializer_context())
         return Response({
-            'count': len(target_rows),
+            'count': len(refreshed_rows),
             'items': serializer.data,
-            'message': f'Successfully applied shift range to {len(target_rows)} mapped roles.',
+            'message': f'Successfully applied shift range to {len(refreshed_rows)} roles.',
         })
 
     @action(detail=False, methods=['post'], url_path='import-all-mapped-roles')
