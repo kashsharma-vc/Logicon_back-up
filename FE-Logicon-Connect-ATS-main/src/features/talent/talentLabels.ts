@@ -372,3 +372,92 @@ export const JOURNEY_STATUS_FILTER_OPTIONS: { value: string; label: string }[] =
   { value: 'blacklisted', label: 'Blacklisted' },
   { value: 'do_not_contact', label: 'Do not contact' },
 ]
+
+/**
+ * Formats technical or database errors into friendly, professional messages for end users.
+ */
+export function formatResumeErrorMessage(error: string | null | undefined): string {
+  if (!error) return ''
+  const trimmed = error.trim()
+  if (!trimmed) return ''
+
+  const lower = trimmed.toLowerCase()
+
+  // NUL bytes / encoding / database unescaped char issues
+  if (
+    lower.includes('nul') ||
+    lower.includes('0x00') ||
+    lower.includes('null character') ||
+    lower.includes('untranslatable')
+  ) {
+    return 'File contains unreadable formatting or unsupported characters. Please re-upload as a standard PDF or Word document.'
+  }
+
+  // PDF extraction issues
+  if (
+    lower.includes('pypdf') ||
+    lower.includes('pdf extraction failed') ||
+    lower.includes('cannot open resume file')
+  ) {
+    return 'Unable to read text from this PDF. It may be scanned, image-based, or password protected.'
+  }
+
+  // Scanned image / no text
+  if (lower.includes('scanned image') || lower.includes('no extractable text')) {
+    return 'Document contains no readable text (likely a scanned image). Please upload a text-based PDF or Word document.'
+  }
+
+  // DOCX / Word issues
+  if (lower.includes('docx extraction failed') || lower.includes('python-docx')) {
+    return 'Unable to read text from this Word document. Please ensure it is a valid .docx file.'
+  }
+
+  // Legacy .doc format
+  if (lower.includes('legacy .doc') || lower.includes('.doc format is not supported')) {
+    return 'Legacy .doc format is not supported. Please save as .docx or .pdf and re-upload.'
+  }
+
+  // Images
+  if (lower.includes('images are not supported') || lower.includes('image files')) {
+    return 'Image files cannot be processed directly. Please upload a PDF or DOCX resume.'
+  }
+
+  // Text too short
+  if (lower.includes('too short')) {
+    return 'Extracted document text is too short to parse candidate details.'
+  }
+
+  // Phone / identifier missing
+  if (lower.includes('no valid indian mobile number') || lower.includes('no_identifier')) {
+    return 'Could not detect a valid mobile number in this document. Manual entry required.'
+  }
+
+  // Duplicate
+  if (lower.includes('duplicate')) {
+    return 'A matching resume file has already been uploaded.'
+  }
+
+  // Timeout
+  if (lower.includes('timeout')) {
+    return 'Processing took longer than expected. Please try again with a smaller file.'
+  }
+
+  // Generic technical exceptions / stack trace leakage
+  if (
+    lower.includes('traceback') ||
+    lower.includes('exception') ||
+    lower.includes('syntaxerror') ||
+    lower.includes('valueerror') ||
+    lower.includes('typeerror') ||
+    lower.includes('keyerror') ||
+    lower.includes('psycopg2') ||
+    lower.includes('operationalerror') ||
+    lower.includes('integrityerror') ||
+    lower.includes('connection refused')
+  ) {
+    return 'The file could not be parsed automatically. Please check the document format or re-upload.'
+  }
+
+  return trimmed
+}
+

@@ -26,7 +26,7 @@ import {
   Package,
 } from 'lucide-react'
 import { CAP, MASTERS_ANY, hasAnyCapability } from '@/lib/capabilities'
-import { isClientFacingUser, getNavPersona } from '@/lib/userRoleMode'
+import { isClientFacingUser, getNavPersona, isUserAdmin } from '@/lib/userRoleMode'
 import type { MeResponse } from '@/types/api'
 
 export interface NavItem {
@@ -35,6 +35,8 @@ export interface NavItem {
   icon: LucideIcon
   /** If omitted, item is visible to all authenticated users. */
   requiredCapabilities?: string[]
+  /** If true, item is only visible to admin users. */
+  adminOnly?: boolean
 }
 
 export interface NavGroup {
@@ -49,7 +51,7 @@ export interface NavGroup {
 const ITEMS = {
   // Overview
   dashboard: { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  myAccess: { path: '/me', label: 'My access', icon: UserCircle },
+  myAccess: { path: '/me', label: 'My access', icon: UserCircle, adminOnly: true },
   myTasks: { path: '/my-tasks', label: 'My tasks', icon: Inbox },
 
   // Access control
@@ -390,16 +392,20 @@ const clientPortalGroups: NavGroup[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Filter nav groups by user capabilities. Every persona group passes through
- * this function — capability checks are never bypassed.
+ * Filter nav groups by user capabilities and admin status. Every persona group passes through
+ * this function — capability and admin checks are never bypassed.
  */
-function filterByCapabilities(groups: NavGroup[], caps: string[]): NavGroup[] {
+function filterNavGroups(groups: NavGroup[], caps: string[], isAdmin: boolean): NavGroup[] {
   return groups
     .map((group) => ({
       label: group.label,
-      items: group.items.filter((item) =>
-        item.requiredCapabilities?.length ? hasAnyCapability(caps, item.requiredCapabilities) : true,
-      ),
+      items: group.items.filter((item) => {
+        if (item.adminOnly && !isAdmin) return false
+        if (item.requiredCapabilities?.length) {
+          return hasAnyCapability(caps, item.requiredCapabilities)
+        }
+        return true
+      }),
     }))
     .filter((group) => group.items.length > 0)
 }
@@ -427,23 +433,24 @@ function getPersonaGroups(persona: string): NavGroup[] {
 /**
  * Returns the sidebar groups for the current user.
  * - Client-facing users get the trimmed client portal nav
- * - Internal users get persona-based nav filtered by capabilities
+ * - Internal users get persona-based nav filtered by capabilities and admin status
  *
- * Capability filtering is always applied — persona nav only controls which
+ * Capability and admin filtering is always applied — persona nav only controls which
  * shortcuts appear, not route access.
  */
 export function buildNavGroups(me: MeResponse | null | undefined): NavGroup[] {
   const caps = me?.capabilities ?? []
+  const admin = isUserAdmin(me)
 
   // Client portal
   if (isClientFacingUser(me)) {
-    return filterByCapabilities(clientPortalGroups, caps)
+    return filterNavGroups(clientPortalGroups, caps, admin)
   }
 
   // Internal: persona-based nav
   const persona = getNavPersona(me)
   const groups = getPersonaGroups(persona)
-  return filterByCapabilities(groups, caps)
+  return filterNavGroups(groups, caps, admin)
 }
 
 /** Flat list in sidebar order; used by `titleForPath` and dashboard shortcuts. */

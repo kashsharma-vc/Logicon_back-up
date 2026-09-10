@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ExternalLink, Search, UserPlus } from 'lucide-react'
+import { Search, UserPlus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAllCapabilities } from '@/lib/capabilities'
@@ -13,7 +13,6 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { ManualResumeIntakeDrawer } from '@/features/talent/ManualResumeIntakeDrawer'
-import { ResumePoolDrawer } from '@/features/hiring/ResumePoolDrawer'
 import {
   hiringLaneBadgeLabel,
   hiringLaneBadgeVariant,
@@ -27,15 +26,12 @@ type HiringLaneFilter = '' | 'client_billable' | 'internal_non_billable'
 
 export function HiringDemandsPage() {
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
-  const canFindFromPool = hasAllCapabilities(meCaps, [CAP.CANDIDATE_READ, CAP.HIRING_APPLICATION_CREATE])
   const canAddNewCandidate = hasAllCapabilities(meCaps, [CAP.CANDIDATE_CREATE, CAP.HIRING_APPLICATION_CREATE])
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<HiringDemandRow[]>([])
   const [intakeOpen, setIntakeOpen] = useState(false)
-  const [poolOpen, setPoolOpen] = useState(false)
-  const [selectedDemand, setSelectedDemand] = useState<HiringDemandRow | null>(null)
   const [prefill, setPrefill] = useState<{ mrfId: number; lineId: number } | null>(null)
 
   // Filters
@@ -80,16 +76,6 @@ export function HiringDemandsPage() {
   function closeIntake() {
     setIntakeOpen(false)
     setPrefill(null)
-  }
-
-  function openPool(d: HiringDemandRow) {
-    setSelectedDemand(d)
-    setPoolOpen(true)
-  }
-
-  function closePool() {
-    setPoolOpen(false)
-    setSelectedDemand(null)
   }
 
   return (
@@ -197,12 +183,6 @@ export function HiringDemandsPage() {
                         <Search className="h-3.5 w-3.5" aria-hidden />
                         Find candidates
                       </Link>
-                      {canFindFromPool ? (
-                        <Button type="button" variant="secondary" className="min-h-8 gap-1 px-2 text-xs" onClick={() => openPool(d)}>
-                          <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                          Quick match from pool
-                        </Button>
-                      ) : null}
                       {canAddNewCandidate ? (
                         <Button type="button" variant="secondary" className="min-h-8 gap-1 px-2 text-xs" onClick={() => openIntake(d)}>
                           <UserPlus className="h-3.5 w-3.5" aria-hidden />
@@ -225,17 +205,6 @@ export function HiringDemandsPage() {
         defaultMrfId={prefill?.mrfId}
         defaultMrfLineItemId={prefill?.lineId}
         onSuccess={() => {
-          void refreshDemands().catch(() => {
-            /* ignore */
-          })
-        }}
-      />
-
-      <ResumePoolDrawer
-        open={poolOpen}
-        demand={selectedDemand}
-        onClose={closePool}
-        onLinked={() => {
           void refreshDemands().catch(() => {
             /* ignore */
           })

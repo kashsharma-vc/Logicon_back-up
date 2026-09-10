@@ -10,6 +10,8 @@ import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { isUserAdmin } from '@/lib/userRoleMode'
+import { NoAccessPage } from '@/features/auth/NoAccessPage'
 
 function formatUserTypeLabel(raw: string | undefined): string {
   if (raw == null || String(raw).trim() === '') return 'Unknown'
@@ -57,6 +59,10 @@ export function MePage() {
 
   if (!me) {
     return <ErrorState message="No profile data loaded." />
+  }
+
+  if (!isUserAdmin(me)) {
+    return <NoAccessPage />
   }
 
   const name = displayName(me)

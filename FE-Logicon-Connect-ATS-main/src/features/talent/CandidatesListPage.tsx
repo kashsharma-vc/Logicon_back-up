@@ -484,17 +484,17 @@ export function CandidatesListPage() {
                 <UploadCloud className="mr-2 h-4 w-4" aria-hidden />
                 Auto-Generate via Excel
               </Button>
-              <Button type="button" onClick={() => setUploadOpen(true)}>
+              {/* <Button type="button" onClick={() => setUploadOpen(true)}>
                 <UploadCloud className="mr-2 h-4 w-4" aria-hidden />
                 Upload resumes
-              </Button>
+              </Button> */}
               <Button type="button" variant="secondary" onClick={() => setHistoryOpen(true)}>
                 <History className="mr-2 h-4 w-4" aria-hidden />
                 History
               </Button>
               <Button type="button" variant="secondary" onClick={() => setIntakeOpen(true)}>
                 <UserPlus className="mr-2 h-4 w-4" aria-hidden />
-                Add candidate
+                Add new candidate
               </Button>
             </>
           )}

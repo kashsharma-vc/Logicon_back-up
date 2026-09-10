@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Download, FileSpreadsheet, FileText, Loader2, Upload, X, XCircle } from 'lucide-react'
+import { CheckCircle2, Download, FileSpreadsheet, FileText, Info, Loader2, Upload, X, XCircle } from 'lucide-react'
 import {
   bulkUploadResumes,
   downloadResumeExcelTemplate,
@@ -16,6 +16,7 @@ import { Drawer } from '@/components/ui/Drawer'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { formatResumeErrorMessage } from '@/features/talent/talentLabels'
 import type { ResumeImportBatch } from '@/features/talent/types'
 
 type UploadMode = 'resumes' | 'excel'
@@ -819,7 +820,10 @@ function BatchResultPanel({
                       <p className="truncate text-xs text-app-subtle">{item.original_filename}</p>
                     ) : null}
                     {item.error_message ? (
-                      <p className="mt-0.5 text-xs text-status-danger">{item.error_message}</p>
+                      <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-app-muted/80 px-2 py-1 text-[11px] text-app-secondary border border-app-border/70">
+                        <Info className="mt-0.5 h-3 w-3 shrink-0 text-app-subtle" aria-hidden />
+                        <span className="leading-snug">{formatResumeErrorMessage(item.error_message)}</span>
+                      </div>
                     ) : null}
                   </div>
                   <Badge variant={variant} className="shrink-0 text-[10px]">

@@ -9,6 +9,7 @@ import {
   Copy,
   FileText,
   History,
+  Info,
   Layers,
   Link2,
   RefreshCw,
@@ -32,7 +33,12 @@ import { EmptyState } from '@/components/ui/EmptyState'
 
 import { Spinner } from '@/components/ui/Spinner'
 import { DuplicateCandidatesPanel } from '@/features/talent/DuplicateCandidatesPanel'
-import { DOCUMENT_TYPE_FILTER_OPTIONS, documentTypeLabel, resumeStatusLabel } from '@/features/talent/talentLabels'
+import {
+  DOCUMENT_TYPE_FILTER_OPTIONS,
+  documentTypeLabel,
+  formatResumeErrorMessage,
+  resumeStatusLabel,
+} from '@/features/talent/talentLabels'
 import type {
   ApplyReviewCandidateInput,
   ApplyReviewEducationInput,
@@ -48,7 +54,7 @@ import type {
 
 function statusVariant(s: string | undefined): 'danger' | 'warning' | 'attention' | 'neutral' | 'success' {
   if (!s) return 'neutral'
-  if (s === 'failed') return 'danger'
+  if (s === 'failed') return 'warning'
   if (s === 'manual_review') return 'warning'
   if (s === 'duplicate_file') return 'attention'
   if (s === 'indexed') return 'success'
@@ -146,7 +152,8 @@ function QueueRow({
 }) {
   const cs = item.candidate_summary
   const ps = item.parsed_resume_summary
-  const reason = item.manual_review_reason || item.error_message || ''
+  const rawReason = item.manual_review_reason || item.error_message || ''
+  const displayReason = formatResumeErrorMessage(rawReason)
   return (
     <button
       type="button"
@@ -179,9 +186,12 @@ function QueueRow({
         {item.document_type ? <span>{documentTypeLabel(item.document_type)}</span> : null}
         {item.uploaded_by != null ? <span>User #{item.uploaded_by}</span> : null}
       </div>
-      {reason && (
-        <p className="mt-0.5 text-[11px] text-status-danger line-clamp-2">{reason}</p>
-      )}
+      {displayReason ? (
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-app-muted/80 px-2 py-1 text-[11px] text-app-secondary border border-app-border/70">
+          <Info className="mt-0.5 h-3 w-3 shrink-0 text-app-subtle" aria-hidden />
+          <span className="line-clamp-2 leading-snug">{displayReason}</span>
+        </div>
+      ) : null}
     </button>
   )
 }
@@ -298,8 +308,10 @@ function ParsedDataTab({
         <h3 className="text-xs font-semibold text-app-secondary uppercase tracking-wide mb-1">Status</h3>
         <div className="bg-app-muted/40 rounded p-2 space-y-0">
           <KV label="Status" value={<Badge variant={statusVariant(detail.status)}>{resumeStatusLabel(detail.status)}</Badge>} />
-          <KV label="Review reason" value={detail.manual_review_reason || '-'} />
-          <KV label="Error" value={detail.error_message || '-'} />
+          <KV label="Review reason" value={formatResumeErrorMessage(detail.manual_review_reason) || '-'} />
+          {detail.error_message ? (
+            <KV label="Processing note" value={formatResumeErrorMessage(detail.error_message)} />
+          ) : null}
         </div>
       </section>
 

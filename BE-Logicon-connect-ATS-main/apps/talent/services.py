@@ -391,6 +391,9 @@ def import_resume_file_for_role(
     except Exception as exc:
         raise ValidationError({'file': f'Could not extract text from {filename}: {exc}'})
 
+    raw_text = (raw_text or '').replace('\x00', '')
+    cleaned_text = (cleaned_text or '').replace('\x00', '')
+
     parsed_json = parse_resume_text(cleaned_text)
     validation_errors, missing_fields = validate_parsed_json(parsed_json)
     normalized = normalize_parsed_json(parsed_json)
@@ -1239,9 +1242,12 @@ def _resume_import_result_payload(result: dict) -> dict:
 
 def _flatten_error(exc) -> str:
     detail = getattr(exc, 'detail', None)
-    if detail is not None:
-        return str(detail)
-    return str(exc)
+    msg = str(detail) if detail is not None else str(exc)
+    msg = msg.replace('\x00', '')
+    lower = msg.lower()
+    if 'nul' in lower or '0x00' in lower or 'null character' in lower or 'untranslatable' in lower:
+        return "File contains unreadable formatting or unsupported characters. Please re-upload as a standard PDF or Word document."
+    return msg
 
 
 def candidate_profile_quality(candidate) -> dict:

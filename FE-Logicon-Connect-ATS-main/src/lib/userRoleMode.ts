@@ -25,3 +25,17 @@ export function isInternalUser(me: MeResponse | null | undefined): boolean {
 export function getNavPersona(me: MeResponse | null | undefined): NavPersona {
   return me?.nav_persona ?? 'mixed'
 }
+
+/**
+ * Backend-driven check: user is an administrator (superuser or admin role persona).
+ */
+export function isUserAdmin(me: MeResponse | null | undefined): boolean {
+  if (!me) return false
+  return Boolean(
+    me.is_superuser ||
+    me.nav_persona === 'admin' ||
+    me.primary_role_codes?.includes('admin') ||
+    me.role_assignments?.some((r) => r.role_code === 'admin')
+  )
+}
+

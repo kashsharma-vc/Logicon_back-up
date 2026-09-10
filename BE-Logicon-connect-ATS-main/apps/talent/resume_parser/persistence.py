@@ -11,6 +11,16 @@ from decimal import Decimal, InvalidOperation
 from django.db import transaction
 
 
+def _strip_null_bytes(obj):
+    if isinstance(obj, str):
+        return obj.replace('\x00', '')
+    if isinstance(obj, dict):
+        return {k: _strip_null_bytes(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_strip_null_bytes(v) for v in obj]
+    return obj
+
+
 def persist_parsed_data(
     resume,
     normalized_json: dict,
@@ -19,6 +29,8 @@ def persist_parsed_data(
     missing_fields: list,
     confidence,
 ) -> None:
+    normalized_json = _strip_null_bytes(normalized_json or {})
+    parsed_json = _strip_null_bytes(parsed_json or {})
     with transaction.atomic():
         _update_candidate(resume.candidate, normalized_json)
         _replace_parsed_skills(resume, normalized_json)

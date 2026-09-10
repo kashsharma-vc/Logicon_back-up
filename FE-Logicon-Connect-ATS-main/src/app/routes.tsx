@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, useLocation, useParams } from 'react-rou
 import { RequireAuth } from '@/features/auth/RequireAuth'
 import { RequireCapability } from '@/features/auth/RequireCapability'
 import { RequireInternal } from '@/features/auth/RequireInternal'
+import { RequireAdmin } from '@/features/auth/RequireAdmin'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { SetPasswordPage } from '@/features/auth/SetPasswordPage'
 import { AppShell } from '@/components/layout/AppShell'
@@ -142,7 +143,14 @@ export const router = createBrowserRouter([
           { path: 'inventory/audit', element: <RequireCapability anyOf={[CAP.INVENTORY_READ]}><InventoryComingSoonPage title="Stock Audit" /></RequireCapability> },
           { path: 'inventory/reports', element: <RequireCapability anyOf={[CAP.INVENTORY_READ]}><InventoryComingSoonPage title="Reports & Analytics" /></RequireCapability> },
           { path: 'inventory/master-setup', element: <RequireCapability anyOf={[CAP.INVENTORY_MANAGE]}><InventoryMasterSetupPage /></RequireCapability> },
-          { path: 'me', element: <MePage /> },
+          {
+            path: 'me',
+            element: (
+              <RequireAdmin>
+                <MePage />
+              </RequireAdmin>
+            ),
+          },
           { path: 'my-tasks', element: <MyTasksPage /> },
           {
             path: 'users',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp, Download, ExternalLink, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronUp, Download, ExternalLink, Info, RefreshCw } from 'lucide-react'
 import { getResumeImportBatch, listResumeImportBatches } from '@/api/talent'
 import { listJobRoles, type JobRoleRow } from '@/api/jobs'
 import { parseApiError } from '@/lib/apiError'
@@ -17,6 +17,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import {
   DOCUMENT_TYPE_FILTER_OPTIONS,
   documentTypeLabel,
+  formatResumeErrorMessage,
   importBatchStatusLabel,
   poolResumeStatusLabel,
   poolResumeStatusVariant,
@@ -97,7 +98,10 @@ function BatchDetailPanel({ batch }: { batch: ResumeImportBatch }) {
                     <p className="font-mono text-xs text-app-subtle">{item.candidate_phone}</p>
                   ) : null}
                   {item.error_message ? (
-                    <p className="mt-0.5 text-xs text-status-danger">{item.error_message}</p>
+                    <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-app-muted/80 px-2 py-1 text-[11px] text-app-secondary border border-app-border/70">
+                      <Info className="mt-0.5 h-3 w-3 shrink-0 text-app-subtle" aria-hidden />
+                      <span className="leading-snug">{formatResumeErrorMessage(item.error_message)}</span>
+                    </div>
                   ) : null}
                   {item.candidate != null ? (
                     <Link
